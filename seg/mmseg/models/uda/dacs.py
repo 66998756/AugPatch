@@ -33,6 +33,8 @@ from mmseg.models import UDA, HRDAEncoderDecoder, build_segmentor
 from mmseg.models.segmentors.hrda_encoder_decoder import crop
 from mmseg.models.uda.masking_consistency_module import \
     MaskingConsistencyModule
+from mmseg.models.uda.augpatch_module import \
+    AugPatchConsistencyModule
 from mmseg.models.uda.uda_decorator import UDADecorator, get_module
 from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
                                                 get_mean_std, strong_transform)
@@ -80,8 +82,12 @@ class DACS(UDADecorator):
         self.blur = cfg['blur']
         self.color_jitter_s = cfg['color_jitter_strength']
         self.color_jitter_p = cfg['color_jitter_probability']
+        # mask config
         self.mask_mode = cfg['mask_mode']
         self.enable_masking = self.mask_mode is not None
+        # aug config
+        self.aug_mode = cfg['aug_mode']
+        self.enable_augment = self.aug_mode is not None
         self.print_grad_magnitude = cfg['print_grad_magnitude']
         assert self.mix == 'class'
 
@@ -95,6 +101,8 @@ class DACS(UDADecorator):
         self.mic = None
         if self.enable_masking:
             self.mic = MaskingConsistencyModule(require_teacher=False, cfg=cfg)
+        if self.enable_augment:
+            self.aug_patch = AugPatchConsistencyModule(require_teacher=False, cfg=cfg)
         if self.enable_fdist:
             self.imnet_model = build_segmentor(deepcopy(cfg['model']))
         else:
@@ -260,6 +268,8 @@ class DACS(UDADecorator):
             self.get_ema_model().debug = debug
         if self.mic is not None:
             self.mic.debug = debug
+        if self.aug_patch is not None:
+            self.aug_patch.debug = debug
 
     def get_pseudo_label_and_weight(self, logits):
         ema_softmax = torch.softmax(logits.detach(), dim=1)
@@ -323,6 +333,8 @@ class DACS(UDADecorator):
             # assert self.get_ema_model().training
         if self.mic is not None:
             self.mic.update_weights(self.get_model(), self.local_iter)
+        if self.aug_patch is not None:
+            self.aug_patch.update_weights(self.get_model(), self.local_iter)
 
         self.update_debug_state()
         seg_debug = {}
@@ -341,6 +353,9 @@ class DACS(UDADecorator):
         # Train on source images
         clean_losses = self.get_model().forward_train(
             img, img_metas, gt_semantic_seg, return_feat=True)
+        ### 這邊拿了source feature
+        # len(src_feat) = 4, shape=(B, [64, 128, 320, 512], [128, 64, 32, 16])
+        # follow segformer encoder 的 output
         src_feat = clean_losses.pop('features')
         seg_debug['Source'] = self.get_model().debug_output
         clean_loss, clean_log_vars = self._parse_losses(clean_losses)
@@ -436,6 +451,18 @@ class DACS(UDADecorator):
             masked_loss, masked_log_vars = self._parse_losses(masked_loss)
             log_vars.update(masked_log_vars)
             masked_loss.backward()
+
+        # AugPatch Training
+        if self.enable_augment and self.aug_mode.startswith('separate'):
+            augmented_loss = self.aug_patch(self.get_model(), img, img_metas,
+                                   gt_semantic_seg, target_img,
+                                   target_img_metas, valid_pseudo_mask,
+                                   pseudo_label, pseudo_weight)
+            seg_debug.update(self.aug_patch.debug_output)
+            augmented_loss = add_prefix(augmented_loss, 'auged')
+            augmented_loss, augmented_log_vars = self._parse_losses(augmented_loss)
+            log_vars.update(augmented_log_vars)
+            augmented_loss.backward()
 
         if self.local_iter % self.debug_img_interval == 0 and \
                 not self.source_only:

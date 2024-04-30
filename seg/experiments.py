@@ -249,7 +249,8 @@ def generate_experiment_cfgs(id):
             train={})
         # DAFormer legacy cropping that only works properly if the training
         # crop has the height of the (resized) target image.
-        if ('dacs' in uda or mask_mode is not None) and plcrop in [True, 'v1']:
+        if ('dacs' in uda or mask_mode is not None or aug_mode is not None) \
+            and plcrop in [True, 'v1']:
             cfg.setdefault('uda', {})
             cfg['uda']['pseudo_weight_ignore_top'] = 15
             cfg['uda']['pseudo_weight_ignore_bottom'] = 120
@@ -257,7 +258,8 @@ def generate_experiment_cfgs(id):
         # the image itself is cropped to ensure that the pseudo-label margins
         # are only masked out if the training crop is at the periphery of the
         # image.
-        if ('dacs' in uda or mask_mode is not None) and plcrop == 'v2':
+        if ('dacs' in uda or mask_mode is not None or aug_mode is not None) \
+            and plcrop == 'v2':
             cfg['data']['train'].setdefault('target', {})
             cfg['data']['train']['target']['crop_pseudo_margins'] = \
                 [30, 240, 30, 30]
@@ -277,6 +279,20 @@ def generate_experiment_cfgs(id):
                 mask_ratio=mask_ratio,
                 mask_block_size=mask_block_size,
                 _delete_=True)
+        if aug_mode is not None:
+            cfg.setdefault('uda', {})
+            cfg['uda']['aug_mode'] = aug_mode
+            cfg['uda']['aug_alpha'] = aug_alpha
+            cfg['uda']['aug_pseudo_threshold'] = aug_pseudo_threshold
+            cfg['uda']['aug_lambda'] = aug_lambda
+            cfg['uda']['aug_generator'] = dict(
+                type=aug_type,
+                augment_setup=augment_setup,
+                num_diff_aug=num_diff_aug, 
+                patch_size=patch_size, 
+                _delete_=True)
+        # 要記得debug
+        cfg['uda']['debug_img_interval'] = iters // 40
 
         # Setup optimizer and schedule
         if 'dacs' in uda or 'minent' in uda or 'advseg' in uda:
@@ -298,7 +314,7 @@ def generate_experiment_cfgs(id):
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
             by_epoch=False, interval=iters, max_keep_ckpts=1)
-        cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
+        cfg['evaluation'] = dict(interval=iters // 40, metric='mIoU')
 
         # Construct config name
         uda_mod = uda
@@ -532,6 +548,62 @@ def generate_experiment_cfgs(id):
         for seed in seeds:
             cfg = config_from_vars()
             cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # MIC with DAFormer AugPatch Implementation
+    # -------------------------------------------------------------------------
+    elif id == 86:
+        seeds = [2]
+        #        opt,     lr,      schedule,     pmult
+        sgd   = ('sgd',   0.0025,  'poly10warm', False)
+        adamw = ('adamw', 0.00006, 'poly10warm', True)
+        #               uda,                  rcs_T, plcrop, opt_hp
+        uda_advseg =   ('advseg',             None,  False,  *sgd)
+        uda_minent =   ('minent',             None,  False,  *sgd)
+        uda_dacs =     ('dacs',               None,  False,  *adamw)
+        uda_daformer = ('dacs_a999_fdthings', 0.01,  True,   *adamw)
+        uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
+        
+        # Masking Detail setting
+        mask_mode, mask_ratio = 'separatetrgaug', 0.7
+
+        # AugPatch Detail setting
+        aug_mode = 'separatetrgaug'
+        aug_alpha = 'same'
+        aug_pseudo_threshold = 'same'
+        aug_lambda = 1
+        # aug_generator setup
+        aug_type = 'RandAugment'
+        augment_setup={'n': 10, 'm': 30}
+        num_diff_aug=3
+        patch_size=32,
+
+        for architecture,                      backbone,  uda_hp in [
+            # ('dlv2red',                        'r101v1c', uda_advseg),
+            # ('dlv2red',                        'r101v1c', uda_minent),
+            # ('dlv2red',                        'r101v1c', uda_dacs),
+            # ('dlv2red',                        'r101v1c', uda_daformer),
+            # ('hrda1-512-0.1_dlv2red',          'r101v1c', uda_hrda),
+            ('daformer_sepaspp',               'mitb5',   uda_daformer),
+            # ('hrda1-512-0.1_daformer_sepaspp', 'mibt5',   uda_hrda),  # already run in exp 80
+        ]:
+            if 'hrda' in architecture:
+                source, target, crop = 'gtaHR', 'cityscapesHR', '1024x1024'
+                rcs_min_crop = 0.5 * (2 ** 2)
+                gpu_model = 'NVIDIATITANRTX'
+                inference = 'slide'
+                mask_block_size = 64
+            else:
+                source, target, crop = 'gta', 'cityscapes', '512x512'
+                rcs_min_crop = 0.5
+                gpu_model = 'NVIDIAGeForceRTX2080Ti'
+                inference = 'whole'
+                # Use half the patch size when training with half resolution
+                mask_block_size = 32
+
+            for seed in seeds:
+                uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_hp
+                cfg = config_from_vars()
+                cfgs.append(cfg)
     else:
         raise NotImplementedError('Unknown id {}'.format(id))
 

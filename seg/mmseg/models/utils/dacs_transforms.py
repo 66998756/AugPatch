@@ -45,6 +45,10 @@ def denorm_(img, mean, std):
     img.mul_(std).add_(mean).div_(255.0)
 
 
+def renorm(img, mean, std):
+    return img.mul_(255.0).sub_(mean).div_(std)
+
+
 def renorm_(img, mean, std):
     img.mul_(255.0).sub_(mean).div_(std)
 
