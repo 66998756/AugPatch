@@ -565,12 +565,13 @@ def generate_experiment_cfgs(id):
         
         # Masking Detail setting
         mask_mode, mask_ratio = 'separatetrgaug', 0.7
+        mask_lambda = 0.5
 
         # AugPatch Detail setting
         aug_mode = 'separatetrgaug'
         aug_alpha = 'same'
         aug_pseudo_threshold = 'same'
-        aug_lambda = 1
+        aug_lambda = 1.0
         # aug_generator setup
         aug_type = 'RandAugment'
         augment_setup={'n': 10, 'm': 30}
