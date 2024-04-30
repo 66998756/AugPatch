@@ -565,7 +565,7 @@ def generate_experiment_cfgs(id):
         
         # Masking Detail setting
         mask_mode, mask_ratio = 'separatetrgaug', 0.7
-        mask_lambda = 0.5
+        mask_lambda = 1
 
         # AugPatch Detail setting
         aug_mode = 'separatetrgaug'
@@ -603,6 +603,47 @@ def generate_experiment_cfgs(id):
 
             for seed in seeds:
                 uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_hp
+                cfg = config_from_vars()
+                cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # MIC with HRDA + aug patch
+    # -------------------------------------------------------------------------
+    # yapf: disable
+    elif id == 87:
+        # seeds = [0, 1, 2]
+        seeds = [2]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
+        
+        # Masking Detail setting
+        mask_block_size = 64
+        mask_mode, mask_ratio = 'separatetrgaug', 0.7
+        mask_lambda = 1
+
+        # AugPatch Detail setting
+        aug_mode = 'separatetrgaug'
+        aug_alpha = 'same'
+        aug_pseudo_threshold = 'same'
+        aug_lambda = 1
+        # aug_generator setup
+        aug_type = 'RandAugment'
+        augment_setup = {'n': 10, 'm': 30}
+        num_diff_aug = 3
+        patch_size = 64,
+
+        for source,          target,         mask_mode in [
+            ('gtaHR',        'cityscapesHR', 'separatetrgaug'),
+            # ('synthiaHR',    'cityscapesHR', 'separatetrgaug'),
+            # ('cityscapesHR', 'acdcHR',       'separate'),
+            # ('cityscapesHR', 'darkzurichHR', 'separate'),
+        ]:
+            for seed in seeds:
+                gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     else:
