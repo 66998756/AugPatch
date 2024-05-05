@@ -42,6 +42,14 @@ from mmseg.models.utils.visualization import prepare_debug_out, subplotimg
 from mmseg.utils.utils import downscale_label_ratio
 
 
+labels = {
+    0: 'road', 1: 'sidew', 2: 'build', 3: 'wall', 4: 'fence', 5: 'pole',
+    6: 'tr. light', 7: 'tr. sign', 8: 'veget.', 9: 'terrain', 10: 'sky',
+    11: 'person', 12: 'rider', 13: 'car', 14: 'truck', 15: 'bus', 16: 'train',
+    17: 'm.bike', 18: 'bike'
+}
+
+
 def _params_equal(ema_model, model):
     for ema_param, param in zip(ema_model.named_parameters(),
                                 model.named_parameters()):
@@ -88,6 +96,10 @@ class DACS(UDADecorator):
         # aug config
         self.aug_mode = cfg['aug_mode']
         self.enable_augment = self.aug_mode is not None
+        # refine config
+        # self.refine_mode = cfg['refine_mode']
+        # self.enable_refine = self.refine_mode is not None
+
         self.print_grad_magnitude = cfg['print_grad_magnitude']
         assert self.mix == 'class'
 
@@ -454,7 +466,7 @@ class DACS(UDADecorator):
 
         # AugPatch Training
         if self.enable_augment and self.aug_mode.startswith('separate'):
-            augmented_loss = self.aug_patch(self.get_model(), img, img_metas,
+            augmented_loss, mask_targets = self.aug_patch(self.get_model(), img, img_metas,
                                    gt_semantic_seg, target_img,
                                    target_img_metas, valid_pseudo_mask,
                                    pseudo_label, pseudo_weight)
@@ -559,8 +571,14 @@ class DACS(UDADecorator):
                         for k2, (n2, out) in enumerate(outs.items()):
                             subplotimg(
                                 axs[k2][k1],
-                                **prepare_debug_out(f'{n1} {n2}', out[j],
-                                                    means, stds))
+                                **prepare_debug_out(
+                                    f'{n1} {n2}, {labels[mask_targets[j]]}' if 
+                                    'Auged' in n1 else f'{n1} {n2}', 
+                                    out[j], means, stds))
+                            # subplotimg(
+                            #     axs[k2][k1],
+                            #     **prepare_debug_out(f'{n1} {n2}', out[j],
+                            #                         means, stds))
                     for ax in axs.flat:
                         ax.axis('off')
                     plt.savefig(

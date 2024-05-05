@@ -1,0 +1,248 @@
+# ---------------------------------------------------------------
+# Copyright (c) 2022 ETH Zurich, Lukas Hoyer. All rights reserved.
+# Licensed under the Apache License, Version 2.0
+# ---------------------------------------------------------------
+
+import random
+import queue
+
+import torch
+from torch.nn import Module
+
+from mmseg.models.uda.teacher_module import EMATeacher
+from mmseg.models.utils.dacs_transforms import get_mean_std, strong_transform
+from mmseg.models.utils.masking_transforms import build_mask_generator
+
+# from mmseg.models.utils.masking_transforms import DualMaskGenerator, ClassMaskGenerator, SceneMaskGenerator
+
+
+class AdaptivePseudoLabelRefinement(Module):
+
+    def __init__(self, require_teacher, cfg):
+        super(AdaptivePseudoLabelRefinement, self).__init__()
+
+        self.source_only = cfg.get('source_only', False)
+        self.max_iters = cfg['max_iters']
+        # self.color_jitter_s = cfg['color_jitter_strength'] # 0.2
+        # self.color_jitter_p = cfg['color_jitter_probability'] # 0.2
+
+        self.refine_mode = cfg['refine_mode']
+        self.refine_alpha = cfg['refine_alpha']
+        self.max_bank_size = cfg['max_bank_size']
+
+        self.teacher = None
+        if require_teacher or self.refine_alpha != 0.0:
+            self.teacher = EMATeacher(use_mask_params=True, cfg=cfg)
+
+        # 每個item有四個不同等級的特徵，詳見 SegFormer
+        self.source_memoqueue = queue.Queue(maxsize=self.max_bank_size)
+        self.target_memoqueue = queue.Queue(maxsize=self.max_bank_size)
+
+        self.debug = False
+        self.debug_output = {}
+
+    def init_centroid(self, source_ft, target_ft):
+        mean = [0 for _ in range(4)]
+        for i in range(4):
+            for j in range(self.max_bank_size):
+                mean[i] += self.source_memoqueue[j]
+
+
+    def update_memo_queue(self, source_ft, target_ft):
+        if self.source_memoqueue.full():
+            _ = self.source_memoqueue.get(), self.target_memoqueue.get()
+        self.source_memoqueue.put(source_ft)
+        self.target_memoqueue.put(target_ft)
+
+    def ema_centroid(self, iter, source_ft, target_ft):
+        alpha_centroid = min(1 - 1 / (iter + 1), self.refine_alpha)
+        for i in range(4):
+            self.source_centroid[i] = alpha_centroid * \
+                self.source_centroid[i] + (1 - alpha_centroid) * source_ft[i]
+            self.target_centroid[i] = alpha_centroid * \
+                self.target_centroid[i] + (1 - alpha_centroid) * target_ft[i]
+
+    def update_debug_state(self):
+        if self.teacher is not None:
+            self.teacher.debug = self.debug
+
+    def __call__(self,
+                 model,
+                 img,
+                 img_metas,
+                 gt_semantic_seg,
+                 target_img,
+                 target_img_metas,
+                 valid_pseudo_mask,
+                 pseudo_label=None,
+                 pseudo_weight=None,
+                 local_hint_ratio=0.0):
+        self.update_debug_state()
+        self.debug_output = {}
+        model.debug_output = {}
+        dev = img.device
+        means, stds = get_mean_std(img_metas, dev)
+
+        if not self.source_only:
+            # Share the pseudo labels with the host UDA method
+            if self.teacher is None:
+                assert self.mask_alpha == 'same'
+                assert self.mask_pseudo_threshold == 'same'
+                assert pseudo_label is not None
+                assert pseudo_weight is not None
+                masked_plabel = pseudo_label
+                masked_pweight = pseudo_weight
+            # Use a separate EMA teacher for MIC
+            else:
+                masked_plabel, masked_pweight = \
+                    self.teacher(
+                        target_img, target_img_metas, valid_pseudo_mask)
+                if self.debug:
+                    self.debug_output['Mask Teacher'] = {
+                        'Img': target_img.detach(),
+                        'Pseudo Label': masked_plabel.cpu().numpy(),
+                        'Pseudo Weight': masked_pweight.cpu().numpy(),
+                    }
+        # Don't use target images at all
+        if self.source_only:
+            masked_img = img
+            masked_lbl = gt_semantic_seg
+            b, _, h, w = gt_semantic_seg.shape
+            masked_seg_weight = None
+        # Use 1x source image and 1x target image for MIC
+        elif self.mask_mode in ['separate', 'separateaug']:
+            assert img.shape[0] == 2
+            masked_img = torch.stack([img[0], target_img[0]])
+            masked_lbl = torch.stack(
+                [gt_semantic_seg[0], masked_plabel[0].unsqueeze(0)])
+            gt_pixel_weight = torch.ones(masked_pweight[0].shape, device=dev)
+            masked_seg_weight = torch.stack(
+                [gt_pixel_weight, masked_pweight[0]])
+        # Use only source images for MIC
+        elif self.mask_mode in ['separatesrc', 'separatesrcaug']:
+            masked_img = img
+            masked_lbl = gt_semantic_seg
+            masked_seg_weight = None
+        # Use only target images for MIC
+        elif self.mask_mode in ['separatetrg', 'separatetrgaug']:
+            masked_img = target_img
+            masked_lbl = masked_plabel.unsqueeze(1)
+            masked_seg_weight = masked_pweight
+        else:
+            raise NotImplementedError(self.mask_mode)
+
+        ### Apply color augmentation
+        # 參照 UniMatch 可以修改成 cutmix
+        # 注意在 strong_transform 中 ColorJitter 參數都是相同的 self.color_jitter_s
+        # ColorJitter(brightness, contrast, saturation, hue)
+        # UniMatch 是 [0.5, 0.5, 0.5, 0.25]，接著做RandomGrayscale(p=0.2)
+        # blur prob.=0.5, sigma=random.uniform(0.1, 2.0)
+        # MIC 的 blur 單純是機率， sigma = np.random.uniform(0.15, 1.15)
+        # 最後做 cutmix (見unimatch) (應該是相同的圖做兩個不同程度的aug後cutmix)
+        if 'aug' in self.mask_mode:
+            strong_parameters = {
+                'mix': None,
+                'color_jitter': random.uniform(0, 1),
+                'color_jitter_s': self.color_jitter_s,
+                'color_jitter_p': self.color_jitter_p,
+                'blur': random.uniform(0, 1),
+                'mean': means[0].unsqueeze(0),
+                'std': stds[0].unsqueeze(0)
+            }
+            masked_img, _ = strong_transform(
+                strong_parameters, data=masked_img.clone())
+        
+        # 一些嘗試，應該要額外寫成API
+        if self.consistency_mode == 'unimatch_like':
+            strong_parameters = {
+                'mix': None,
+                'color_jitter': random.uniform(0, 1),
+                'color_jitter_s': {
+                    'brightness': 0.5,
+                    'contrast': 0.5,
+                    'saturation': 0.5,
+                    'hue': 0.25,
+                },
+                'color_jitter_p': self.color_jitter_p,
+                'blur': random.uniform(0, 1),
+                'mean': means[0].unsqueeze(0),
+                'std': stds[0].unsqueeze(0)
+            }
+            auged_img, _ = strong_transform(
+                strong_parameters, data=target_img.clone(), mode='unimatch')
+        elif self.consistency_mode == 'fixmatch_like':
+            strong_parameters = {
+                'mix': None,
+                'color_jitter': random.uniform(0, 1),
+                'color_jitter_s': {
+                    'brightness': 0.5,
+                    'contrast': 0.5,
+                    'saturation': 0.5,
+                    'hue': 0.25,
+                },
+                'color_jitter_p': self.color_jitter_p,
+                'blur': random.uniform(0, 1),
+                'mean': means[0].unsqueeze(0),
+                'std': stds[0].unsqueeze(0)
+            }
+            auged_img, _ = strong_transform(
+                strong_parameters, data=target_img.clone(), mode='fixmatch')
+            # print(auged_img.shape)
+            
+
+
+        # Apply masking to image
+        pseudo_label_region = valid_pseudo_mask.clone().bool()
+        masked_imgs, mask_targets, hint_patch_nums = self.mask_gen.mask_image(
+            masked_img, masked_lbl, pseudo_label_region, local_hint_ratio, mix=auged_img, mask_lambda=self.mask_lambda)
+
+        # Train on masked images
+        masked_losses = []
+        for idx, masked_img in enumerate(masked_imgs):
+            masked_losses.append(model.forward_train(
+                masked_img,
+                img_metas,
+                masked_lbl,
+                seg_weight=masked_seg_weight,
+            ))
+            
+            # if self.debug and len(self.lambda_weight) > 1:
+            #     self.debug_output['Masked_{}'.format(idx)] = model.debug_output
+            #     if masked_seg_weight is not None:
+            #         self.debug_output['Masked_{}'.format(idx)]['PL Weight'] = \
+            #             masked_seg_weight.cpu().numpy()
+            if self.debug and self.consistency_mode == 'unimatch_like':
+                self.debug_output['Fused' if idx % 2 else 'Masked'] = model.debug_output
+                if masked_seg_weight is not None:
+                    self.debug_output['Fused' if idx % 2 else 'Masked']['PL Weight'] = \
+                        masked_seg_weight.cpu().numpy()
+
+        # Class and scene consistency
+        # if isinstance(self.mask_gen, DualMaskGenerator):
+        if len(masked_losses) > 1:
+            for i, weight in enumerate(self.lambda_weight):
+                for key in masked_losses[i].keys():
+                    masked_losses[i][key] *= weight
+        
+            masked_loss = {}
+            for key, value in masked_losses[0].items():
+                masked_loss[key] = value
+
+            return masked_loss, mask_targets, hint_patch_nums
+    
+        # original MIC
+        else:
+            masked_loss = masked_losses[0]
+
+            if self.mask_lambda == 0.0:
+                masked_loss['decode.loss_seg'] *= self.consistency_lambda
+            elif self.mask_lambda != 1:
+                masked_loss['decode.loss_seg'] *= self.mask_lambda
+
+            if self.debug:
+                self.debug_output['Masked'] = model.debug_output
+                if masked_seg_weight is not None:
+                    self.debug_output['Masked']['PL Weight'] = \
+                        masked_seg_weight.cpu().numpy()
+            
+            return masked_loss, mask_targets, hint_patch_nums

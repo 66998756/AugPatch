@@ -13,6 +13,7 @@ from mmseg.models.utils.dacs_transforms import get_mean_std, strong_transform
 # from mmseg.models.utils.rand_augment import aug_generator
 
 from mmseg.models.utils.augment_patch import Augmentations
+from mmseg.models.utils.class_masking import ClassMaskGenerator
 
 class AugPatchConsistencyModule(Module):
 
@@ -29,6 +30,13 @@ class AugPatchConsistencyModule(Module):
         self.aug_pseudo_threshold = cfg['aug_pseudo_threshold']
         self.aug_lambda = cfg['aug_lambda']
         self.transforms = Augmentations(cfg['aug_generator'])
+
+        # class masking config
+        if cfg['cls_mask'] == 'Random':
+            self.cls_mask = ClassMaskGenerator(
+                'Random', cfg['aug_generator']['patch_size'])
+        else:
+            self.cls_mask = None
 
         assert self.aug_mode in [
             'separate', 'separatesrc', 'separatetrg', 'separateaug',
@@ -62,7 +70,7 @@ class AugPatchConsistencyModule(Module):
                  target_img_metas,
                  valid_pseudo_mask,
                  pseudo_label=None,
-                 pseudo_weight=None):
+                 pseudo_weight=None,):
         self.update_debug_state()
         self.debug_output = {}
         model.debug_output = {}
@@ -136,9 +144,22 @@ class AugPatchConsistencyModule(Module):
         else:
             strong_parameters = None
 
-        # Apply masking to image
+        # Apply AugPatch to image
         auged_img = self.transforms.generate_augpatch(
             auged_img.clone(), means, stds, strong_parameters)
+        
+        # 因為 valid_pseudo_mask可能是None，所以用pseudo_mask當作range
+        if valid_pseudo_mask is None:
+            if torch.max(pseudo_weight):
+                valid_mask_region = pseudo_weight.clone().bool()
+            else:
+                valid_mask_region = (~ pseudo_weight.clone().bool())
+        else:
+            valid_mask_region = valid_pseudo_mask.clone()
+        # Apply class masking to auged image
+        if self.cls_mask:
+            auged_img, mask_targets = self.cls_mask.mask_image(
+                auged_img, auged_lbl, valid_mask_region.unsqueeze(dim=1))
 
         # Train on masked images
         auged_loss = model.forward_train(
@@ -156,4 +177,4 @@ class AugPatchConsistencyModule(Module):
                 self.debug_output['Auged']['PL Weight'] = \
                     auged_seg_weight.cpu().numpy()
 
-        return auged_loss
+        return auged_loss, mask_targets

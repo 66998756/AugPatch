@@ -291,6 +291,8 @@ def generate_experiment_cfgs(id):
                 num_diff_aug=num_diff_aug, 
                 patch_size=patch_size, 
                 _delete_=True)
+        if cls_mask is not None:
+            cfg['uda']['cls_mask'] = cls_mask
         # 要記得debug
         cfg['uda']['debug_img_interval'] = iters // 40
 
@@ -564,8 +566,10 @@ def generate_experiment_cfgs(id):
         uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
         
         # Masking Detail setting
-        mask_mode, mask_ratio = 'separatetrgaug', 0.7
-        mask_lambda = 1
+        # mask_mode = 'separatetrgaug'
+        mask_mode = None
+        mask_ratio = 0.7
+        mask_lambda = 0.5
 
         # AugPatch Detail setting
         aug_mode = 'separatetrgaug'
@@ -574,9 +578,11 @@ def generate_experiment_cfgs(id):
         aug_lambda = 1.0
         # aug_generator setup
         aug_type = 'RandAugment'
-        augment_setup={'n': 10, 'm': 30}
-        num_diff_aug=3
+        augment_setup={'n': 8, 'm': 30}
+        num_diff_aug=32
         patch_size=32,
+        # apply class masking
+        cls_mask = 'Random'
 
         for architecture,                      backbone,  uda_hp in [
             # ('dlv2red',                        'r101v1c', uda_advseg),
