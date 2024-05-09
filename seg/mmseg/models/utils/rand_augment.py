@@ -9,6 +9,7 @@ from PIL import Image
 
 import torchvision
 import torchvision.transforms.functional as F
+# from torchvision import transforms as F
 
 from mmseg.models.utils.dacs_transforms import denorm, renorm, color_jitter
 
@@ -217,57 +218,130 @@ def SamplePairing(imgs):  # [0, 0.4]
 def Identity(img, v):
     return img
 
+### torch implemtation
+def posterize(img, v):  # [0.25, 0.875]
+    assert 0.1 <= v <= 0.9
+    bits = int((1 - v) * 8)
+    return img.mul(2 ** bits).div(2 ** bits)
+
+def solarize(img, v):  # [0.25, 0.875]
+    assert 0.1 <= v <= 0.9
+    threshold = int(v * 255)
+    return torch.where(img < threshold / 255, img, 1 - img)
+
+def auto_contrast(img, _):
+    # Compute per-channel minimum and maximum values
+    min_vals, _ = torch.min(img, dim=-1, keepdim=True)
+    max_vals, _ = torch.max(img, dim=-1, keepdim=True)
+    
+    # Compute per-channel range
+    range_vals = max_vals - min_vals
+    
+    # Apply autocontrast normalization
+    normalized_img = (img - min_vals) / (range_vals + 1e-6)  # Add a small epsilon to avoid division by zero
+    normalized_img = torch.clamp(normalized_img, 0, 1)  # Ensure values are in [0, 1] range
+    
+    return normalized_img
+
+def invert(img, _):
+    return 1 - img
+
+# def equalize(img, _):
+#     # Convert the image to grayscale
+#     gray_img = img.mean(dim=0, keepdim=True)
+    
+#     # Compute the cumulative distribution function (CDF)
+#     cdf = gray_img.cumsum(dim=-1).cumsum(dim=-2)
+    
+#     # Normalize the CDF to the range [0, 1]
+#     cdf_normalized = cdf / cdf.max()
+    
+#     # Interpolate the values using the normalized CDF
+#     equalized_img = F.interpolate(gray_img.unsqueeze(dim=0), size=img.shape[-2:], mode='bicubic', align_corners=False)    
+#     # Stack the equalized grayscale image across channels
+#     # equalized_img = equalized_img.expand_as(img)
+
+    
+#     return equalized_img
+def equalize(image, v):
+    """Implements Equalize function from PIL using PyTorch ops based on:
+    https://github.com/tensorflow/tpu/blob/master/models/official/efficientnet/autoaugment.py#L352"""
+    def scale_channel(im, c):
+        """Scale the data in the channel to implement equalize."""
+        im = im[c, :, :]
+
+        im = im * 255
+        # Compute the histogram of the image channel.
+        histo = torch.histc(im, bins=256, min=0, max=255)#.type(torch.int32)
+        # For the purposes of computing the step, filter out the nonzeros.
+        nonzero_histo = torch.reshape(histo[histo != 0], [-1])
+        step = (torch.sum(nonzero_histo) - nonzero_histo[-1]) // 255
+        def build_lut(histo, step):
+            # Compute the cumulative sum, shifting by step // 2
+            # and then normalization by step.
+            lut = (torch.cumsum(histo, 0) + (step // 2)) // step
+            # Shift lut, prepending with 0.
+            lut = torch.cat([torch.zeros(1).cuda(), lut[:-1]]) 
+            # Clip the counts to be in range.  This is done
+            # in the C code for image.point.
+            return torch.clamp(lut, 0, 255)
+
+        # If step is zero, return the original image.  Otherwise, build
+        # lut from the full histogram and step and then index from it.
+        if step == 0:
+            result = im
+        else:
+            # can't index using 2d index. Have to flatten and then reshape
+            result = torch.gather(build_lut(histo, step), 0, im.flatten().long())
+            result = result.reshape_as(im)
+        result = result / 255
+        return result.type(torch.uint8)
+
+    # Assumes RGB for now.  Scales each channel independently
+    # and then stacks the result.
+    s1 = scale_channel(image, 0)
+    s2 = scale_channel(image, 1)
+    s3 = scale_channel(image, 2)
+    image = torch.stack([s1, s2, s3], 2)
+    return image
+
+def contrast(img, v):  # [0.1, 1.9]
+    assert 0.1 <= v <= 0.9
+    mean_value = img.mean()
+    return torch.clamp((img - mean_value) * v + mean_value, 0, 1)
+
+def color(img, v):  # [0.1, 1.9]
+    assert 0.1 <= v <= 0.9
+    gray_img = img.mean(dim=0, keepdim=True)
+    return torch.lerp(gray_img, img, v)
+
+def brightness(img, v):  # [0.1, 1.9]
+    assert 0.1 <= v <= 0.9
+    return torch.clamp(img * v, 0, 1)
+
+
+def sharpness(img, alpha=1.0):
+    # Define a sharpening kernel
+    kernel = torch.tensor([
+        [[0, -1, 0], [-1, 5, -1], [0, -1, 0]],
+        [[0, -1, 0], [-1, 5, -1], [0, -1, 0]],
+        [[0, -1, 0], [-1, 5, -1], [0, -1, 0]]
+    ], dtype=torch.float32).unsqueeze(0)  # 將卷積核的深度由1擴展為3，並將其轉換為4D張量
+
+
+    # Apply convolution with the sharpening kernel
+    sharpened_img = F.conv2d(img.unsqueeze(0), kernel.to(device=img.device), padding=1, stride=1)
+
+    # Apply scaling factor alpha to the sharpened image and add to the original image
+    sharpened_img = alpha * sharpened_img + (1 - alpha) * img
+
+    return sharpened_img.squeeze()
+
 
 def augment_list():  # 16 oeprations and their ranges
-    # https://github.com/google-research/uda/blob/master/image/randaugment/policies.py#L57
-    # l = [
-    #     (Identity, 0., 1.0),
-    #     (ShearX, 0., 0.3),  # 0
-    #     (ShearY, 0., 0.3),  # 1
-    #     (TranslateX, 0., 0.33),  # 2
-    #     (TranslateY, 0., 0.33),  # 3
-    #     (Rotate, 0, 30),  # 4
-    #     (AutoContrast, 0, 1),  # 5
-    #     (Invert, 0, 1),  # 6
-    #     (Equalize, 0, 1),  # 7
-    #     (Solarize, 0, 110),  # 8
-    #     (Posterize, 4, 8),  # 9
-    #     # (Contrast, 0.1, 1.9),  # 10
-    #     (Color, 0.1, 1.9),  # 11
-    #     (Brightness, 0.1, 1.9),  # 12
-    #     (Sharpness, 0.1, 1.9),  # 13
-    #     # (Cutout, 0, 0.2),  # 14
-    #     # (SamplePairing(imgs), 0, 0.4),  # 15
-    # ]
-
-    # https://github.com/tensorflow/tpu/blob/8462d083dd89489a79e3200bcc8d4063bf362186/models/official/efficientnet/autoaugment.py#L505
-    # l = [
-    #     (AutoContrast, 0, 1),
-    #     (Equalize, 0, 1),
-    #     (Invert, 0, 1),
-    #     (Rotate, 0, 30),
-    #     (Posterize, 0, 4),
-    #     (Solarize, 0, 256),
-    #     (SolarizeAdd, 0, 110),
-    #     (Color, 0.1, 1.9),
-    #     (Contrast, 0.1, 1.9),
-    #     (Brightness, 0.1, 1.9),
-    #     (Sharpness, 0.1, 1.9),
-    #     (ShearX, 0., 0.3),
-    #     (ShearY, 0., 0.3),
-    #     (CutoutAbs, 0, 40),
-    #     (TranslateXabs, 0., 100),
-    #     (TranslateYabs, 0., 100),
-    # ]
-
     # 這裡把所有變形的全註解
     l = [
-        (Identity, 0., 1.0),
-        # (ShearX, 0., 0.3),  # 0
-        # (ShearY, 0., 0.3),  # 1
-        # (TranslateX, 0., 0.33),  # 2
-        # (TranslateY, 0., 0.33),  # 3
-        # (Rotate, 0, 30),  # 4
+        (Identity, 0., 1.0), # 強制一定要aug
         (AutoContrast, 0, 1),  # 5
         (Invert, 0, 1),  # 6
         (Equalize, 0, 1),  # 7
@@ -277,57 +351,22 @@ def augment_list():  # 16 oeprations and their ranges
         (Color, 0.1, 1.9),  # 11
         (Brightness, 0.1, 1.9),  # 12
         (Sharpness, 0.1, 1.9),  # 13
-        # (Cutout, 0, 0.2),  # 14
-        # (SamplePairing(imgs), 0, 0.4),  # 15
     ]
 
+    # l = [
+    #     (Identity, 0., 1.0), # 強制一定要aug
+    #     (auto_contrast, 0, 1),  # 5
+    #     (invert, 0, 1),  # 6
+    #     (equalize, 0.1, 0.9),  # 7
+    #     (solarize, 0.1, 0.9),  # 8
+    #     (posterize, 0.1, 0.9),  # 9
+    #     (contrast, 0.1, 0.9),  # 10
+    #     (color, 0.1, 0.9),  # 11
+    #     (brightness, 0.1, 0.9),  # 12
+    #     (sharpness, 0.1, 0.9),  # 13
+    # ]
+
     return l
-
-
-class Lighting(object):
-    """Lighting noise(AlexNet - style PCA - based noise)"""
-
-    def __init__(self, alphastd, eigval, eigvec):
-        self.alphastd = alphastd
-        self.eigval = torch.Tensor(eigval)
-        self.eigvec = torch.Tensor(eigvec)
-
-    def __call__(self, img):
-        if self.alphastd == 0:
-            return img
-
-        alpha = img.new().resize_(3).normal_(0, self.alphastd)
-        rgb = self.eigvec.type_as(img).clone() \
-            .mul(alpha.view(1, 3).expand(3, 3)) \
-            .mul(self.eigval.view(1, 3).expand(3, 3)) \
-            .sum(1).squeeze()
-
-        return img.add(rgb.view(3, 1, 1).expand_as(img))
-
-
-class CutoutDefault(object):
-    """
-    Reference : https://github.com/quark0/darts/blob/master/cnn/utils.py
-    """
-    def __init__(self, length):
-        self.length = length
-
-    def __call__(self, img):
-        h, w = img.size(1), img.size(2)
-        mask = np.ones((h, w), np.float32)
-        y = np.random.randint(h)
-        x = np.random.randint(w)
-
-        y1 = np.clip(y - self.length // 2, 0, h)
-        y2 = np.clip(y + self.length // 2, 0, h)
-        x1 = np.clip(x - self.length // 2, 0, w)
-        x2 = np.clip(x + self.length // 2, 0, w)
-
-        mask[y1: y2, x1: x2] = 0.
-        mask = torch.from_numpy(mask)
-        mask = mask.expand_as(img)
-        img *= mask
-        return img
 
 
 class RandAugment:

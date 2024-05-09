@@ -111,6 +111,7 @@ class DACS(UDADecorator):
         if not self.source_only:
             self.ema_model = build_segmentor(ema_cfg)
         self.mic = None
+        self.aug_patch = None
         if self.enable_masking:
             self.mic = MaskingConsistencyModule(require_teacher=False, cfg=cfg)
         if self.enable_augment:
