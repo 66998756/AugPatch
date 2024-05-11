@@ -291,11 +291,11 @@ def generate_experiment_cfgs(id):
                 num_diff_aug=num_diff_aug, 
                 patch_size=patch_size, 
                 _delete_=True)
-        if aug_mode is None:
-            cfg['uda']['aug_mode'] = aug_mode
+            cfg['uda']['geometric_perturb'] = geometric_perturb
         if cls_mask is not None:
             cfg['uda']['cls_mask'] = cls_mask
         # 要記得debug
+        cfg['uda']['loss_adjustment'] = loss_adjustment
         cfg['uda']['debug_img_interval'] = iters // 40
 
         # Setup optimizer and schedule
@@ -401,25 +401,15 @@ def generate_experiment_cfgs(id):
     plcrop = False
     inference = 'whole'
     sync_crop_size = None
-    # mask init
     mask_mode = None
     mask_alpha = 'same'
     mask_pseudo_threshold = 'same'
     mask_lambda = 1
     mask_block_size = None
     mask_ratio = 0
-    # AugPatch init
-    aug_mode = None
-    aug_alpha = 'same'
-    aug_pseudo_threshold = 'same'
-    aug_lambda = 1.0
-    # aug_generator setup
-    aug_type = 'RandAugment'
-    augment_setup = {'n': 8, 'm': 20}
-    num_diff_aug = 16
-    patch_size = 32
-    # apply class masking
-    cls_mask = 'Random'
+
+    geometric_perturb = None
+    loss_adjustment = False
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
     # -------------------------------------------------------------------------
@@ -460,11 +450,11 @@ def generate_experiment_cfgs(id):
         uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
         mask_mode, mask_ratio = 'separatetrgaug', 0.7
         for architecture,                      backbone,  uda_hp in [
-            # ('dlv2red',                        'r101v1c', uda_advseg),
-            # ('dlv2red',                        'r101v1c', uda_minent),
-            # ('dlv2red',                        'r101v1c', uda_dacs),
-            # ('dlv2red',                        'r101v1c', uda_daformer),
-            # ('hrda1-512-0.1_dlv2red',          'r101v1c', uda_hrda),
+            ('dlv2red',                        'r101v1c', uda_advseg),
+            ('dlv2red',                        'r101v1c', uda_minent),
+            ('dlv2red',                        'r101v1c', uda_dacs),
+            ('dlv2red',                        'r101v1c', uda_daformer),
+            ('hrda1-512-0.1_dlv2red',          'r101v1c', uda_hrda),
             ('daformer_sepaspp',               'mitb5',   uda_daformer),
             # ('hrda1-512-0.1_daformer_sepaspp', 'mibt5',   uda_hrda),  # already run in exp 80
         ]:
@@ -475,17 +465,12 @@ def generate_experiment_cfgs(id):
                 inference = 'slide'
                 mask_block_size = 64
             else:
-                source, target, crop = 'cityscapes', 'acdc', '512x512'
+                source, target, crop = 'gta', 'cityscapes', '512x512'
                 rcs_min_crop = 0.5
                 gpu_model = 'NVIDIAGeForceRTX2080Ti'
                 inference = 'whole'
                 # Use half the patch size when training with half resolution
                 mask_block_size = 32
-                # AugPatch init
-                aug_mode = None
-                aug_alpha = 'same'
-                aug_pseudo_threshold = 'same'
-                aug_lambda = 1.0
             for seed in seeds:
                 uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_hp
                 cfg = config_from_vars()
@@ -595,14 +580,18 @@ def generate_experiment_cfgs(id):
         aug_mode = 'separatetrgaug'
         aug_alpha = 'same'
         aug_pseudo_threshold = 'same'
-        aug_lambda = 1.0
+        aug_lambda = 0.5
         # aug_generator setup
         aug_type = 'RandAugment'
-        augment_setup={'n': 8, 'm': 20}
+        augment_setup={'n': 8, 'm': 30}
         num_diff_aug=16
         patch_size=32,
         # apply class masking
         cls_mask = 'Random'
+        geometric_perturb = False
+
+        # consistency setup
+        loss_adjustment = True
 
         for architecture,                      backbone,  uda_hp in [
             # ('dlv2red',                        'r101v1c', uda_advseg),
@@ -621,6 +610,7 @@ def generate_experiment_cfgs(id):
                 mask_block_size = 64
             else:
                 source, target, crop = 'gta', 'cityscapes', '512x512'
+                # source, target, crop = 'synthia', 'cityscapes', '512x512'
                 rcs_min_crop = 0.5
                 gpu_model = 'NVIDIAGeForceRTX2080Ti'
                 inference = 'whole'
@@ -750,8 +740,8 @@ def generate_experiment_cfgs(id):
         uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
         
         # Masking Detail setting
-        # mask_mode = 'separatetrgaug'
-        mask_mode = None
+        mask_mode = 'separatetrgaug'
+        # mask_mode = None
         mask_ratio = 0.7
         mask_lambda = 0.5
 
@@ -767,6 +757,7 @@ def generate_experiment_cfgs(id):
         patch_size=32,
         # apply class masking
         cls_mask = 'Random'
+        geometric_perturb = False
 
         for architecture,                      backbone,  uda_hp in [
             # ('dlv2red',                        'r101v1c', uda_advseg),
@@ -784,8 +775,8 @@ def generate_experiment_cfgs(id):
                 inference = 'slide'
                 mask_block_size = 64
             else:
-                # source, target, crop = 'gta', 'cityscapes', '512x512'
-                source, target, crop = 'cityscapes', 'darkzurich', '512x512'
+                source, target, crop = 'gta', 'cityscapes', '512x512'
+                # source, target, crop = 'cityscapes', 'darkzurich', '512x512'
                 rcs_min_crop = 0.5
                 gpu_model = 'NVIDIAGeForceRTX2080Ti'
                 inference = 'whole'

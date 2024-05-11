@@ -14,6 +14,8 @@ from mmseg.models.utils.dacs_transforms import get_mean_std, strong_transform
 
 from mmseg.models.utils.augment_patch import Augmentations
 from mmseg.models.utils.class_masking import ClassMaskGenerator
+from mmseg.models.utils.geometric_perturb import GeometricPerturb
+
 
 class AugPatchConsistencyModule(Module):
 
@@ -30,6 +32,10 @@ class AugPatchConsistencyModule(Module):
         self.aug_pseudo_threshold = cfg['aug_pseudo_threshold']
         self.aug_lambda = cfg['aug_lambda']
         self.transforms = Augmentations(cfg['aug_generator'])
+
+        self.geometric_perturb = cfg['geometric_perturb']
+        if self.geometric_perturb:
+            self.perturb = GeometricPerturb(cfg['aug_generator']['patch_size'])
 
         # class masking config
         if cfg['cls_mask'] == 'Random':
@@ -70,7 +76,8 @@ class AugPatchConsistencyModule(Module):
                  target_img_metas,
                  valid_pseudo_mask,
                  pseudo_label=None,
-                 pseudo_weight=None,):
+                 pseudo_weight=None,
+                 loss_adjustment=False):
         self.update_debug_state()
         self.debug_output = {}
         model.debug_output = {}
@@ -160,6 +167,9 @@ class AugPatchConsistencyModule(Module):
         if self.cls_mask:
             auged_img, mask_targets = self.cls_mask.mask_image(
                 auged_img, auged_lbl, valid_mask_region.unsqueeze(dim=1))
+        # Apply random patch geometric perturb
+        if self.geometric_perturb:
+            auged_img = self.perturb.generate_perturb(auged_img)
 
         # Train on masked images
         auged_loss = model.forward_train(
@@ -170,6 +180,13 @@ class AugPatchConsistencyModule(Module):
         )
         if self.aug_lambda != 1:
             auged_loss['decode.loss_seg'] *= self.aug_lambda
+
+        # Dynamic Loss Adjustment
+        # L_aug = L_aug + alpha * L_aug
+        # alpha = (current_iter / total_iter)
+        if loss_adjustment:
+            auged_loss['decode.loss_seg'] += auged_loss['decode.loss_seg'] * \
+                (loss_adjustment / self.max_iters)
 
         if self.debug:
             self.debug_output['Auged'] = model.debug_output

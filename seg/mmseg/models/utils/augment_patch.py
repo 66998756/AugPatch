@@ -51,6 +51,7 @@ class Augmentations:
 
             current_aug_set = auged_imgs[batch]
             for target, auged_img in enumerate(current_aug_set):
+                auged_img = auged_img.squeeze()
                 imgs[batch][augment_indice == target] = \
                     auged_img[augment_indice == target]
 

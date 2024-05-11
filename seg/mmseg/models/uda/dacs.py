@@ -96,9 +96,13 @@ class DACS(UDADecorator):
         # aug config
         self.aug_mode = cfg['aug_mode']
         self.enable_augment = self.aug_mode is not None
+        # self.geometric_perturb = cfg['geometric_perturb']
         # refine config
         # self.refine_mode = cfg['refine_mode']
         # self.enable_refine = self.refine_mode is not None
+
+        # other setup
+        self.loss_adjustment = cfg['loss_adjustment']
 
         self.print_grad_magnitude = cfg['print_grad_magnitude']
         assert self.mix == 'class'
@@ -115,7 +119,8 @@ class DACS(UDADecorator):
         if self.enable_masking:
             self.mic = MaskingConsistencyModule(require_teacher=False, cfg=cfg)
         if self.enable_augment:
-            self.aug_patch = AugPatchConsistencyModule(require_teacher=False, cfg=cfg)
+            self.aug_patch = AugPatchConsistencyModule(
+                require_teacher=False, cfg=cfg)
         if self.enable_fdist:
             self.imnet_model = build_segmentor(deepcopy(cfg['model']))
         else:
@@ -453,12 +458,15 @@ class DACS(UDADecorator):
             log_vars.update(mix_log_vars)
             mix_loss.backward()
 
+        # Dynamic Consistency Loss Adjustment
+        self.loss_adjustment = self.local_iter if self.loss_adjustment else self.loss_adjustment
         # Masked Training
         if self.enable_masking and self.mask_mode.startswith('separate'):
             masked_loss = self.mic(self.get_model(), img, img_metas,
                                    gt_semantic_seg, target_img,
                                    target_img_metas, valid_pseudo_mask,
-                                   pseudo_label, pseudo_weight)
+                                   pseudo_label, pseudo_weight,
+                                   self.loss_adjustment)
             seg_debug.update(self.mic.debug_output)
             masked_loss = add_prefix(masked_loss, 'masked')
             masked_loss, masked_log_vars = self._parse_losses(masked_loss)
@@ -470,7 +478,8 @@ class DACS(UDADecorator):
             augmented_loss, mask_targets = self.aug_patch(self.get_model(), img, img_metas,
                                    gt_semantic_seg, target_img,
                                    target_img_metas, valid_pseudo_mask,
-                                   pseudo_label, pseudo_weight)
+                                   pseudo_label, pseudo_weight,
+                                   self.loss_adjustment)
             seg_debug.update(self.aug_patch.debug_output)
             augmented_loss = add_prefix(augmented_loss, 'auged')
             augmented_loss, augmented_log_vars = self._parse_losses(augmented_loss)
