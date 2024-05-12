@@ -292,9 +292,10 @@ def generate_experiment_cfgs(id):
                 patch_size=patch_size, 
                 _delete_=True)
             cfg['uda']['geometric_perturb'] = geometric_perturb
-        if cls_mask is not None:
-            cfg['uda']['cls_mask'] = cls_mask
-        # 要記得debug
+        else:
+            cfg['uda']['aug_mode'] = None
+        # 其他 Setup
+        cfg['uda']['cls_mask'] = cls_mask
         cfg['uda']['loss_adjustment'] = loss_adjustment
         cfg['uda']['debug_img_interval'] = iters // 40
 
@@ -574,21 +575,23 @@ def generate_experiment_cfgs(id):
         mask_mode = 'separatetrgaug'
         # mask_mode = None
         mask_ratio = 0.7
-        mask_lambda = 0.5
+        mask_lambda = 1.0
 
         # AugPatch Detail setting
         aug_mode = 'separatetrgaug'
+        # aug_mode = None
         aug_alpha = 'same'
         aug_pseudo_threshold = 'same'
-        aug_lambda = 0.5
+        aug_lambda = 1.0
         # aug_generator setup
         aug_type = 'RandAugment'
-        augment_setup={'n': 8, 'm': 30}
+        augment_setup={'n': 4, 'm': 30}
         num_diff_aug=16
         patch_size=32,
         # apply class masking
-        cls_mask = 'Random'
-        geometric_perturb = False
+        # cls_mask = 'Random'
+        cls_mask = True
+        geometric_perturb = True
 
         # consistency setup
         loss_adjustment = True

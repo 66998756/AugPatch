@@ -458,15 +458,19 @@ class DACS(UDADecorator):
             log_vars.update(mix_log_vars)
             mix_loss.backward()
 
-        # Dynamic Consistency Loss Adjustment
-        self.loss_adjustment = self.local_iter if self.loss_adjustment else self.loss_adjustment
         # Masked Training
         if self.enable_masking and self.mask_mode.startswith('separate'):
             masked_loss = self.mic(self.get_model(), img, img_metas,
                                    gt_semantic_seg, target_img,
                                    target_img_metas, valid_pseudo_mask,
-                                   pseudo_label, pseudo_weight,
-                                   self.loss_adjustment)
+                                   pseudo_label, pseudo_weight)
+            # Dynamic Loss Adjustment
+            # L_mask = alpha * L_mask
+            # alpha = 1 - (current_iter / total_iter)
+            if self.loss_adjustment:
+                masked_loss['decode.loss_seg'] *= (
+                    1 - (self.local_iter / self.max_iters))
+
             seg_debug.update(self.mic.debug_output)
             masked_loss = add_prefix(masked_loss, 'masked')
             masked_loss, masked_log_vars = self._parse_losses(masked_loss)
@@ -474,12 +478,21 @@ class DACS(UDADecorator):
             masked_loss.backward()
 
         # AugPatch Training
+        mask_targets = None
         if self.enable_augment and self.aug_mode.startswith('separate'):
-            augmented_loss, mask_targets = self.aug_patch(self.get_model(), img, img_metas,
+            augmented_loss, mask_targets = self.aug_patch(
+                                   self.get_model(), img, img_metas,
                                    gt_semantic_seg, target_img,
                                    target_img_metas, valid_pseudo_mask,
-                                   pseudo_label, pseudo_weight,
-                                   self.loss_adjustment)
+                                   pseudo_label, pseudo_weight)
+            # Dynamic Loss Adjustment
+            # L_aug = L_aug + alpha * L_aug
+            # alpha = (current_iter / total_iter)
+            if self.loss_adjustment:
+                augmented_loss['decode.loss_seg'] += (
+                    augmented_loss['decode.loss_seg'] * 
+                        (self.local_iter / self.max_iters))
+            
             seg_debug.update(self.aug_patch.debug_output)
             augmented_loss = add_prefix(augmented_loss, 'auged')
             augmented_loss, augmented_log_vars = self._parse_losses(augmented_loss)
@@ -579,16 +592,18 @@ class DACS(UDADecorator):
                     )
                     for k1, (n1, outs) in enumerate(seg_debug.items()):
                         for k2, (n2, out) in enumerate(outs.items()):
-                            subplotimg(
-                                axs[k2][k1],
-                                **prepare_debug_out(
-                                    f'{n1} {n2}, {labels[mask_targets[j]]}' if 
-                                    'Auged' in n1 else f'{n1} {n2}', 
-                                    out[j], means, stds))
-                            # subplotimg(
-                            #     axs[k2][k1],
-                            #     **prepare_debug_out(f'{n1} {n2}', out[j],
-                            #                         means, stds))
+                            if mask_targets:
+                                subplotimg(
+                                    axs[k2][k1],
+                                    **prepare_debug_out(
+                                        f'{n1} {n2}, {labels[mask_targets[j]]}' if 
+                                        'Auged' in n1 else f'{n1} {n2}', 
+                                        out[j], means, stds))
+                            else:
+                                subplotimg(
+                                    axs[k2][k1],
+                                    **prepare_debug_out(f'{n1} {n2}', out[j],
+                                                        means, stds))
                     for ax in axs.flat:
                         ax.axis('off')
                     plt.savefig(

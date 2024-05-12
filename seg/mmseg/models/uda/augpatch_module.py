@@ -163,13 +163,16 @@ class AugPatchConsistencyModule(Module):
                 valid_mask_region = (~ pseudo_weight.clone().bool())
         else:
             valid_mask_region = valid_pseudo_mask.clone()
+
         # Apply class masking to auged image
+        mask_targets = None
         if self.cls_mask:
             auged_img, mask_targets = self.cls_mask.mask_image(
                 auged_img, auged_lbl, valid_mask_region.unsqueeze(dim=1))
+            
         # Apply random patch geometric perturb
         if self.geometric_perturb:
-            auged_img = self.perturb.generate_perturb(auged_img)
+            auged_img = self.perturb.perturb_img(auged_img)
 
         # Train on masked images
         auged_loss = model.forward_train(
@@ -180,13 +183,6 @@ class AugPatchConsistencyModule(Module):
         )
         if self.aug_lambda != 1:
             auged_loss['decode.loss_seg'] *= self.aug_lambda
-
-        # Dynamic Loss Adjustment
-        # L_aug = L_aug + alpha * L_aug
-        # alpha = (current_iter / total_iter)
-        if loss_adjustment:
-            auged_loss['decode.loss_seg'] += auged_loss['decode.loss_seg'] * \
-                (loss_adjustment / self.max_iters)
 
         if self.debug:
             self.debug_output['Auged'] = model.debug_output

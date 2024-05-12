@@ -60,8 +60,7 @@ class MaskingConsistencyModule(Module):
                  target_img_metas,
                  valid_pseudo_mask,
                  pseudo_label=None,
-                 pseudo_weight=None,
-                 loss_adjustment=False):
+                 pseudo_weight=None):
         self.update_debug_state()
         self.debug_output = {}
         model.debug_output = {}
@@ -143,12 +142,6 @@ class MaskingConsistencyModule(Module):
         if self.mask_lambda != 1:
             masked_loss['decode.loss_seg'] *= self.mask_lambda
         
-        # Dynamic Loss Adjustment
-        # L_mask = alpha * L_mask
-        # alpha = 1 - (current_iter / total_iter)
-        if loss_adjustment:
-            masked_loss['decode.loss_seg'] *= 1 - (loss_adjustment / self.max_iters)
-
         if self.debug:
             self.debug_output['Masked'] = model.debug_output
             if masked_seg_weight is not None:

@@ -19,6 +19,8 @@ from experiments import generate_experiment_cfgs
 from mmcv import Config, get_git_hash
 from tools import train
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def run_command(command):
     p = subprocess.Popen(

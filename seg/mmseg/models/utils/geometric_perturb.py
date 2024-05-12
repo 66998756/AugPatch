@@ -1,64 +1,20 @@
-import random
-import torchvision.transforms.functional as TF
-
 import torch
+import kornia
+import kornia.augmentation as K
 
 class RandomTransform:
-    def __init__(self, rng=None):
-        self.rng = rng if rng is not None else random.Random()
-
-    def __call__(self, img):
-        func = self.rng.choice([
-            self.ShearX, self.ShearY, self.TranslateX, self.TranslateXabs,
-            self.TranslateY, self.TranslateYabs, self.Rotate
-        ])
-        return func(img)
-
-    def ShearX(self, img):
-        v = self.rng.uniform(-0.3, 0.3)
-        if self.rng.random() > 0.5:
-            v = -v
-        return TF.affine(img, angle=0, translate=(0, 0), scale=1, shear=(v, 0))
-
-    def ShearY(self, img):
-        v = self.rng.uniform(-0.3, 0.3)
-        if self.rng.random() > 0.5:
-            v = -v
-        return TF.affine(img, angle=0, translate=(0, 0), scale=1, shear=(0, v))
-
-    def TranslateX(self, img):
-        v = self.rng.uniform(-0.45, 0.45)
-        if self.rng.random() > 0.5:
-            v = -v
-        v = v * img.size[0]
-        return TF.affine(img, angle=0, translate=(v, 0), scale=1, shear=0)
-
-    def TranslateXabs(self, img):
-        v = self.rng.uniform(0, 0.45)
-        if self.rng.random() > 0.5:
-            v = -v
-        v = v * img.size[0]
-        return TF.affine(img, angle=0, translate=(v, 0), scale=1, shear=0)
-
-    def TranslateY(self, img):
-        v = self.rng.uniform(-0.45, 0.45)
-        if self.rng.random() > 0.5:
-            v = -v
-        v = v * img.size[1]
-        return TF.affine(img, angle=0, translate=(0, v), scale=1, shear=0)
-
-    def TranslateYabs(self, img):
-        v = self.rng.uniform(0, 0.45)
-        if self.rng.random() > 0.5:
-            v = -v
-        v = v * img.size[1]
-        return TF.affine(img, angle=0, translate=(0, v), scale=1, shear=0)
-
-    def Rotate(self, img):
-        v = self.rng.uniform(-30, 30)
-        if self.rng.random() > 0.5:
-            v = -v
-        return TF.rotate(img, angle=v)
+    def __init__(self):
+        # Define the transformations: random rotate, translate, and shear
+        self.transforms = torch.nn.Sequential(
+            K.RandomRotation(degrees=30),
+            K.RandomAffine(degrees=0, translate=(0.1, 0.1), shear=(10, 10))
+        )
+    
+    def __call__(self, patches):
+        # Apply transformations to the batch of patches
+        # Expect patches of shape [B*N, C, patch_size, patch_size]
+        # where B is batch size, N is number of patches per batch
+        return self.transforms(patches)
     
 
 class GeometricPerturb:
@@ -67,11 +23,22 @@ class GeometricPerturb:
         self.perturb = RandomTransform()
     
     @torch.no_grad()
-    def generate_perturb(self, imgs):
+    def perturb_img(self, imgs):
         B, C, H, W = imgs.shape
-        unfolded_imgs = torch.nn.functional.unfold(imgs, 
-            kernel_size=self.patch_size, stride=self.patch_size)
-        perturbed_unfolded_imgs = self.perturb(unfolded_imgs)
-        perturbed_imgs = torch.nn.functional.fold(perturbed_unfolded_imgs, 
-            output_size=(H, W), kernel_size=self.patch_size, stride=self.patch_size)
-        return perturbed_imgs
+        
+        # Unfold the image into patches
+        patches = imgs.unfold(2, self.patch_size, self.patch_size).unfold(
+            3, self.patch_size, self.patch_size)
+        patches = patches.contiguous().view(
+            -1, C, self.patch_size, self.patch_size)  # Reshape to [total_patches, C, H_patch, W_patch]
+        
+        # Apply random geometric perturbations
+        perturbed_patches = self.perturb(patches)
+
+        # Fold the perturbed patches back into an image
+        perturbed_patches = perturbed_patches.view(
+            B, C, H // self.patch_size, W // self.patch_size, self.patch_size, self.patch_size)
+        perturbed_patches = perturbed_patches.permute(0, 2, 4, 3, 5, 1).contiguous()
+        perturbed_patches = perturbed_patches.view(B, H, W, C)
+        
+        return perturbed_patches.permute(0, 3, 1, 2)
