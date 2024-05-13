@@ -10,7 +10,7 @@ class Augmentations:
         self.aug_type = cfg['type']
         self.augment_setup = cfg['augment_setup']
         self.num_diff_aug = cfg['num_diff_aug']
-        self.patch_size = cfg['patch_size'][0]
+        self.aug_block_size = cfg['aug_block_size']
         
         self.transforms = []
         for i in range(self.num_diff_aug):
@@ -41,7 +41,7 @@ class Augmentations:
         auged_imgs = self.apply_transforms(imgs, basic_aug_param)
 
         B, C, H, W = imgs.shape
-        mshap = 1, 1, round(H / self.patch_size), round(W / self.patch_size)
+        mshap = 1, 1, round(H / self.aug_block_size), round(W / self.aug_block_size)
         for batch in range(B):
             
             augment_indice = torch.randint(

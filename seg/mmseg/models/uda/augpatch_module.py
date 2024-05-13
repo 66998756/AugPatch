@@ -35,12 +35,12 @@ class AugPatchConsistencyModule(Module):
 
         self.geometric_perturb = cfg['geometric_perturb']
         if self.geometric_perturb:
-            self.perturb = GeometricPerturb(cfg['aug_generator']['patch_size'])
+            self.perturb = GeometricPerturb(cfg['aug_generator']['aug_block_size'])
 
         # class masking config
         if cfg['cls_mask'] == 'Random':
             self.cls_mask = ClassMaskGenerator(
-                'Random', cfg['aug_generator']['patch_size'])
+                'Random', cfg['aug_generator']['aug_block_size'])
         else:
             self.cls_mask = None
 
