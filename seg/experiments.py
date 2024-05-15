@@ -843,17 +843,16 @@ def generate_experiment_cfgs(id):
         aug_block_size = 64
         # apply class masking
         cls_mask = 'Random'
-        geometric_perturb = False
+        # geometric_perturb = False
 
-        # consistency setup
-        loss_adjustment = True
+        # # consistency setup
+        # loss_adjustment = True
 
         for geometric_perturb, loss_adjustment in [
-            (False, False),
-            (False, True),
-            (True, True),
             (True, False),
+            (True, True),
         ]:
+            aug_lambda = 0.5 if loss_adjustment else 1.0
             for seed in seeds:
                 gpu_model = 'NVIDIATITANRTX'
                 # plcrop is only necessary for Cityscapes as target domains

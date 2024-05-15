@@ -7,7 +7,7 @@ class RandomTransform:
         # Define the transformations: random rotate, translate, and shear
         self.transforms = torch.nn.Sequential(
             K.RandomRotation(degrees=30),
-            K.RandomAffine(degrees=0, translate=(0.25, 0.25), shear=(30, 30))
+            K.RandomAffine(degrees=0, translate=(0.25, 0.25), shear=(-30, 30))
         )
     
     def __call__(self, patches):
