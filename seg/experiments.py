@@ -672,7 +672,7 @@ def generate_experiment_cfgs(id):
         aug_type = 'RandAugment'
         augment_setup = {'n': 10, 'm': 30}
         num_diff_aug = 3
-        aug_block_size = 64,
+        aug_block_size = 64
 
         for source,          target,         mask_mode in [
             ('gtaHR',        'cityscapesHR', 'separatetrgaug'),
@@ -720,6 +720,10 @@ def generate_experiment_cfgs(id):
         aug_block_size=32,
         # apply class masking
         cls_mask = 'Random'
+        geometric_perturb = False
+
+        # consistency setup
+        loss_adjustment = False
 
         for architecture,                      backbone,  uda_hp in [
             # ('dlv2red',                        'r101v1c', uda_advseg),
@@ -809,6 +813,52 @@ def generate_experiment_cfgs(id):
 
             for seed in seeds:
                 uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_hp
+                cfg = config_from_vars()
+                cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # Real world UDA for AugPatch
+    # -------------------------------------------------------------------------
+    elif id == 90:
+        seeds = [2]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
+        source, target = 'cityscapesHR', 'acdcHR'
+        # source, target = 'cityscapesHR', 'darkzurichHR'
+        # mask setup
+        mask_mode = 'separatetrgaug'
+        mask_block_size, mask_ratio = 64, 0.7
+        mask_lambda = 0.5
+        
+        # AugPatch Detail setting
+        aug_mode = 'separatetrgaug'
+        aug_alpha = 'same'
+        aug_pseudo_threshold = 'same'
+        aug_lambda = 1.0
+        # aug_generator setup
+        aug_type = 'RandAugment'
+        augment_setup = {'n': 8, 'm': 30}
+        num_diff_aug = 16
+        aug_block_size = 64
+        # apply class masking
+        cls_mask = 'Random'
+        geometric_perturb = False
+
+        # consistency setup
+        loss_adjustment = True
+
+        for geometric_perturb, loss_adjustment in [
+            (False, False),
+            (False, True),
+            (True, True),
+            (True, False),
+        ]:
+            for seed in seeds:
+                gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     else:

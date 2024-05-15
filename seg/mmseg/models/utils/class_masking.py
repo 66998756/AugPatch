@@ -9,7 +9,7 @@ class ClassMaskGenerator:
         # self.hint_ratio = hint_ratio
 
         self.mask_type = mask_type
-        self.mask_block_size = int(mask_block_size[0])
+        self.mask_block_size = int(mask_block_size)
 
     @torch.no_grad()
     def DHA(self, unfolded_block_mask, hint_ratio):
