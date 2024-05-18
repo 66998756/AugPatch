@@ -407,6 +407,7 @@ def generate_experiment_cfgs(id):
     plcrop = False
     inference = 'whole'
     sync_crop_size = None
+
     # mask init
     mask_mode = None
     mask_alpha = 'same'
@@ -414,6 +415,7 @@ def generate_experiment_cfgs(id):
     mask_lambda = 1
     mask_block_size = None
     mask_ratio = 0
+
     # AugPatch init
     aug_mode = None
     aug_alpha = 'same'
@@ -422,13 +424,14 @@ def generate_experiment_cfgs(id):
     # aug_generator setup
     aug_type = 'RandAugment'
     augment_setup = {'n': 8, 'm': 20}
-    num_diff_aug = 16
-    aug_block_size = 32
+    num_diff_aug = None
+    aug_block_size = None
     # apply class masking
     cls_mask = 'Random'
     # other setup
     geometric_perturb = None
     loss_adjustment = False
+
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
     # -------------------------------------------------------------------------
@@ -855,6 +858,53 @@ def generate_experiment_cfgs(id):
             aug_lambda = 0.5 if loss_adjustment else 1.0
             for seed in seeds:
                 gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                cfg = config_from_vars()
+                cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # MIC with HRDA AugPatch Implementation, cityscapes to ACDC (refer exp 82)
+    # -------------------------------------------------------------------------
+    elif id == 91:
+        seeds = [2]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
+
+        # cityscapes to acdc (HRDA)
+        source, target = 'cityscapesHR', 'acdcHR'
+
+        # MIC setup
+        mask_block_size, mask_ratio = 64, 0.7
+        mask_lambda = 0.5
+        mask_mode = 'separatetrgaug'
+
+        # AugPatch setup
+        aug_mode = 'separatetrgaug'
+        aug_lambda = 1.0
+        aug_block_size = 64
+        num_diff_aug = 16
+
+
+        for loss_adjustment, geometric_perturb, cls_mask in [
+            (False,          True,              'Random'),
+            (True,           True,              'Random'),
+
+            (True,           True,              False),
+            (True,           False,             'Random'),
+
+            (False,          True,              False),
+            (True,           False,             False),
+
+            (False,          False,             False),
+            (False,          False,             'Random'),
+        ]:
+            for seed in seeds:
+                gpu_model = 'NVIDIAA40'
+                # balance lambda
+                aug_lambda = 0.5 if loss_adjustment else 1.0
                 # plcrop is only necessary for Cityscapes as target domains
                 # ACDC and DarkZurich have no rectification artifacts.
                 plcrop = 'v2' if 'cityscapes' in target else False

@@ -38,5 +38,9 @@ class GeometricPerturb:
         perturbed_patches = perturbed_patches.view(B, H // self.aug_block_size, W // self.aug_block_size, C, self.aug_block_size, self.aug_block_size)
         perturbed_patches = perturbed_patches.permute(0, 3, 1, 4, 2, 5).contiguous()
         perturbed_patches = perturbed_patches.view(B, C, H, W)
+
+        # Mix two imgs
+        mask = perturbed_patches == 0
+        perturbed_patches[mask] = imgs[mask]
         
         return perturbed_patches
