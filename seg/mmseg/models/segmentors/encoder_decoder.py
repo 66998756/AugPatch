@@ -82,20 +82,20 @@ class EncoderDecoder(BaseSegmentor):
             x = self.neck(x)
         return x
 
-    def generate_pseudo_label(self, img, img_metas):
+    def generate_pseudo_label(self, img, img_metas, return_feat=False):
         self.update_debug_state()
         if self.debug:
             self.debug_output = {
                 'Image': img,
             }
-        out = self.encode_decode(img, img_metas)
+        out, feat = self.encode_decode(img, img_metas, return_feat=return_feat)
         if self.debug:
             self.debug_output.update(self.decode_head.debug_output)
             self.debug_output['Pred'] = out.cpu().numpy()
 
-        return out
+        return out, feat
 
-    def encode_decode(self, img, img_metas, upscale_pred=True):
+    def encode_decode(self, img, img_metas, upscale_pred=True, return_feat=False):
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
         x = self.extract_feat(img)
@@ -106,7 +106,9 @@ class EncoderDecoder(BaseSegmentor):
                 size=img.shape[2:],
                 mode='bilinear',
                 align_corners=self.align_corners)
-        return out
+        if return_feat:
+            return out, x
+        return out, None
 
     def forward_with_aux(self, img, img_metas):
         self.update_debug_state()
