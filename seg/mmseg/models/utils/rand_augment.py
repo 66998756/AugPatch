@@ -154,7 +154,7 @@ class RandAugment:
 
         if basic_aug_param:
             aug = basic_aug()
-        img = aug.apply_basic_aug(img, basic_aug_param)
+            img = aug.apply_basic_aug(img, basic_aug_param)
         img = F.to_pil_image(img)
         ops = random.choices(self.augment_list, k=self.n)
         for op, minval, maxval in ops:

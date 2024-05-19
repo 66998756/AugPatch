@@ -21,6 +21,7 @@ from tools import train
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 def run_command(command):
     p = subprocess.Popen(

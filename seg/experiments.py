@@ -299,6 +299,25 @@ def generate_experiment_cfgs(id):
             cfg['uda']['cls_mask'] = cls_mask
         else:
             cfg['uda']['aug_mode'] = None
+
+        # Self-voting setup
+        if enable_refine:
+            refine_cfg = {
+                'k': k,
+                'refine_aug': {
+                    'type': 'RandAugment',
+                    'augment_setup': refine_aug,
+                    'num_diff_aug': num_diff_ref_aug,
+                    'aug_block_size': 0
+                },
+                'start_iters': start_iters,
+                'max_bank_size': max_bank_size
+            }
+            cfg['uda']['refine'] = refine_cfg
+        else:
+            cfg['uda']['refine'] = None
+
+
         # 其他 Setup
         cfg['uda']['cls_mask'] = cls_mask
         cfg['uda']['loss_adjustment'] = loss_adjustment
@@ -431,6 +450,13 @@ def generate_experiment_cfgs(id):
     # other setup
     geometric_perturb = None
     loss_adjustment = False
+
+    # Self-voting setup
+    enable_refine = False
+    k = 4
+    refine_aug = {'n': 4, 'm': 10}
+    start_iters = 1500
+    max_bank_size = 200
 
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
@@ -882,6 +908,73 @@ def generate_experiment_cfgs(id):
         aug_lambda = 1.0
         aug_block_size = 64
         num_diff_aug = 16
+
+
+        for loss_adjustment, geometric_perturb, cls_mask in [
+            (False,          True,              'Random'),
+            (True,           True,              'Random'),
+
+            (True,           True,              False),
+            (True,           False,             'Random'),
+
+            (False,          True,              False),
+            (True,           False,             False),
+
+            (False,          False,             False),
+            (False,          False,             'Random'),
+        ]:
+            for seed in seeds:
+                gpu_model = 'NVIDIAA40'
+                # balance lambda
+                aug_lambda = 0.5 if loss_adjustment else 1.0
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                cfg = config_from_vars()
+                cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # DAFormer + MIC + AugPatch + Self-voting, cityscapes to acdc
+    # -------------------------------------------------------------------------
+    elif id == 92:
+        seeds = [2]
+        #        opt,     lr,      schedule,     pmult
+        sgd   = ('sgd',   0.0025,  'poly10warm', False)
+        adamw = ('adamw', 0.00006, 'poly10warm', True)
+        #               uda,                  rcs_T, plcrop, opt_hp
+        uda_daformer = ('dacs_a999_fdthings', 0.01,  False,   *adamw)
+
+        uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_daformer
+
+        architecture = 'daformer_sepaspp'
+        rcs_min_crop = 0.5
+        backbone = 'mitb5'
+
+        gpu_model = 'NVIDIAGeForceRTX2080Ti'
+        inference = 'whole'
+         
+        # cityscapes to acdc (HRDA)
+        # source, target = 'cityscapes', 'acdc'
+        source, target = 'cityscapes', 'darkzurich'
+
+        # MIC setup
+        mask_block_size, mask_ratio = 32, 0.7
+        mask_lambda = 0.5
+        mask_mode = 'separatetrgaug'
+
+        # AugPatch setup
+        aug_mode = 'separatetrgaug'
+        aug_lambda = 1.0
+        aug_block_size = 32
+        num_diff_aug = 16
+        augment_setup={'n': 8, 'm': 30}
+
+        # Self-voting setup
+        enable_refine = True
+        k = 4
+        refine_aug = {'n': 2, 'm': 10}
+        num_diff_ref_aug = 16
+        start_iters = 50
+        max_bank_size = 200
 
 
         for loss_adjustment, geometric_perturb, cls_mask in [

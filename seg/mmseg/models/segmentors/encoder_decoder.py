@@ -92,8 +92,9 @@ class EncoderDecoder(BaseSegmentor):
         if self.debug:
             self.debug_output.update(self.decode_head.debug_output)
             self.debug_output['Pred'] = out.cpu().numpy()
-
-        return out, feat
+        if return_feat:
+            return out, feat
+        return out
 
     def encode_decode(self, img, img_metas, upscale_pred=True, return_feat=False):
         """Encode images with backbone and decode into a semantic segmentation

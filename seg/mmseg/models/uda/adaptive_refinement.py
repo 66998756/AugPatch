@@ -13,6 +13,10 @@ from mmseg.models.uda.teacher_module import EMATeacher
 from mmseg.models.utils.dacs_transforms import get_mean_std, strong_transform
 from mmseg.models.utils.masking_transforms import build_mask_generator
 
+from mmseg.models.utils.dacs_transforms import denorm, renorm
+
+from mmseg.models.utils.augment_patch import Augmentations
+
 # from mmseg.models.utils.masking_transforms import DualMaskGenerator, ClassMaskGenerator, SceneMaskGenerator
 
 
@@ -21,22 +25,27 @@ class AdaptivePseudoLabelRefinement(Module):
     def __init__(self, require_teacher, cfg):
         super(AdaptivePseudoLabelRefinement, self).__init__()
 
-        self.source_only = cfg.get('source_only', False)
-        self.max_iters = cfg['max_iters']
+        # self.source_only = cfg.get('source_only', False)
+        self.start_iters = cfg['start_iters']
         # self.color_jitter_s = cfg['color_jitter_strength'] # 0.2
         # self.color_jitter_p = cfg['color_jitter_probability'] # 0.2
 
-        self.refine_mode = cfg['refine_mode']
-        self.refine_alpha = cfg['refine_alpha']
+        # self.refine_mode = cfg['refine_mode']
+        # self.refine_alpha = cfg['refine_alpha']
         self.max_bank_size = cfg['max_bank_size']
 
-        self.teacher = None
-        if require_teacher or self.refine_alpha != 0.0:
-            self.teacher = EMATeacher(use_mask_params=True, cfg=cfg)
+        # Augmentation Setup
+        self.transforms = Augmentations(cfg['refine_aug'])
+        self.k = cfg['k']
+
+        # self.teacher = None
+        # if require_teacher or self.refine_alpha != 0.0:
+        #     self.teacher = EMATeacher(use_mask_params=True, cfg=cfg)
 
         # 每個item有四個不同等級的特徵，詳見 SegFormer
-        self.source_memoqueue = queue.Queue(maxsize=self.max_bank_size)
-        self.target_memoqueue = queue.Queue(maxsize=self.max_bank_size)
+        self.source_queue = torch.zeros(self.max_bank_size, 512, 16, 16)
+        self.source_queue_meta = queue.Queue(maxsize=self.max_bank_size)
+        # self.target_memoqueue = torch.zeros(self.max_bank_size, 512, 16)
 
         self.debug = False
         self.debug_output = {}
@@ -45,14 +54,37 @@ class AdaptivePseudoLabelRefinement(Module):
         mean = [0 for _ in range(4)]
         for i in range(4):
             for j in range(self.max_bank_size):
-                mean[i] += self.source_memoqueue[j]
+                mean[i] += self.source_queue[j]
 
+    def update_memo_queue(self, queue, new_feature, img):
+        """
+        将新特征添加到队列中。如果队列已满，移除最旧的特征。
 
-    def update_memo_queue(self, source_ft, target_ft):
-        if self.source_memoqueue.full():
-            _ = self.source_memoqueue.get(), self.target_memoqueue.get()
-        self.source_memoqueue.put(source_ft)
-        self.target_memoqueue.put(target_ft)
+        :param queue: 当前的内存队列，形状 [max_queue_size, 512, 16]
+        :param new_feature: 新的特征，形状 [512, 16] 或 [B, 512, 16]
+        """
+        # 检查new_feature是否是单个特征或一个batch
+        if new_feature.dim() == 2:
+            new_feature = new_feature.unsqueeze(0)  # 从 [512, 16] 转换为 [1, 512, 16]
+
+        # 计算新特征加入后总大小
+        total_size = queue.size(0) + new_feature.size(0)
+        
+        # 如果加入新特征后超过了队列大小
+        if total_size > self.max_bank_size:
+            # 计算超出的数量
+            excess = total_size - self.max_bank_size
+            # 移除最旧的特征，并添加新特征
+            queue = torch.cat((queue, new_feature), dim=0)[excess:]
+        else:
+            # 直接添加新特征
+            queue = torch.cat((queue, new_feature), dim=0)
+
+        if self.source_queue_meta.full():
+            _ = self.source_queue_meta.get()
+        self.source_queue_meta.put(img)
+        
+        return queue
 
     def ema_centroid(self, iter, source_ft, target_ft):
         alpha_centroid = min(1 - 1 / (iter + 1), self.refine_alpha)
@@ -62,27 +94,26 @@ class AdaptivePseudoLabelRefinement(Module):
             self.target_centroid[i] = alpha_centroid * \
                 self.target_centroid[i] + (1 - alpha_centroid) * target_ft[i]
 
-    def update_debug_state(self):
-        if self.teacher is not None:
-            self.teacher.debug = self.debug
+    def update_debug_state(self, model):
+        # if self.teacher is not None:
+        #     self.teacher.debug = self.debug
+        model.debug = self.debug
 
     def __call__(self,
                  model,
                  img,
                  img_metas,
-                 gt_semantic_seg,
                  target_img,
                  target_img_metas,
-                 valid_pseudo_mask,
                  pseudo_label=None,
-                 pseudo_weight=None,
-                 local_hint_ratio=0.0):
-        self.update_debug_state()
+                 local_iter=None):
+        self.update_debug_state(model)
         self.debug_output = {}
         model.debug_output = {}
         dev = img.device
         means, stds = get_mean_std(img_metas, dev)
 
+        """
         if not self.source_only:
             # Share the pseudo labels with the host UDA method
             if self.teacher is None:
@@ -130,119 +161,111 @@ class AdaptivePseudoLabelRefinement(Module):
             masked_seg_weight = masked_pweight
         else:
             raise NotImplementedError(self.mask_mode)
+        """
 
-        ### Apply color augmentation
-        # 參照 UniMatch 可以修改成 cutmix
-        # 注意在 strong_transform 中 ColorJitter 參數都是相同的 self.color_jitter_s
-        # ColorJitter(brightness, contrast, saturation, hue)
-        # UniMatch 是 [0.5, 0.5, 0.5, 0.25]，接著做RandomGrayscale(p=0.2)
-        # blur prob.=0.5, sigma=random.uniform(0.1, 2.0)
-        # MIC 的 blur 單純是機率， sigma = np.random.uniform(0.15, 1.15)
-        # 最後做 cutmix (見unimatch) (應該是相同的圖做兩個不同程度的aug後cutmix)
-        if 'aug' in self.mask_mode:
-            strong_parameters = {
-                'mix': None,
-                'color_jitter': random.uniform(0, 1),
-                'color_jitter_s': self.color_jitter_s,
-                'color_jitter_p': self.color_jitter_p,
-                'blur': random.uniform(0, 1),
-                'mean': means[0].unsqueeze(0),
-                'std': stds[0].unsqueeze(0)
-            }
-            masked_img, _ = strong_transform(
-                strong_parameters, data=masked_img.clone())
+        # self.source_queue = self.source_queue.to(device=dev)
+        ### Self-volting memory bank setup
+        src_feat = model.extract_feat(img)
+        # 暫時只取最高級特徵
+        # print(src_feat[3].shape)
+        # self.source_queue = self.update_memo_queue(
+        #     self.source_queue, src_feat[3].cpu().detach(), img.cpu().detach())
+        self.source_queue = self.update_memo_queue(
+            self.source_queue.to(device=dev), 
+            src_feat[3], 
+            img.cpu().detach().clone()
+        ).to(device='cpu')
         
-        # 一些嘗試，應該要額外寫成API
-        if self.consistency_mode == 'unimatch_like':
-            strong_parameters = {
-                'mix': None,
-                'color_jitter': random.uniform(0, 1),
-                'color_jitter_s': {
-                    'brightness': 0.5,
-                    'contrast': 0.5,
-                    'saturation': 0.5,
-                    'hue': 0.25,
-                },
-                'color_jitter_p': self.color_jitter_p,
-                'blur': random.uniform(0, 1),
-                'mean': means[0].unsqueeze(0),
-                'std': stds[0].unsqueeze(0)
-            }
-            auged_img, _ = strong_transform(
-                strong_parameters, data=target_img.clone(), mode='unimatch')
-        elif self.consistency_mode == 'fixmatch_like':
-            strong_parameters = {
-                'mix': None,
-                'color_jitter': random.uniform(0, 1),
-                'color_jitter_s': {
-                    'brightness': 0.5,
-                    'contrast': 0.5,
-                    'saturation': 0.5,
-                    'hue': 0.25,
-                },
-                'color_jitter_p': self.color_jitter_p,
-                'blur': random.uniform(0, 1),
-                'mean': means[0].unsqueeze(0),
-                'std': stds[0].unsqueeze(0)
-            }
-            auged_img, _ = strong_transform(
-                strong_parameters, data=target_img.clone(), mode='fixmatch')
-            # print(auged_img.shape)
-            
+        # Warm up
+        if local_iter < self.start_iters:
+            return pseudo_label, None
 
-
-        # Apply masking to image
-        pseudo_label_region = valid_pseudo_mask.clone().bool()
-        masked_imgs, mask_targets, hint_patch_nums = self.mask_gen.mask_image(
-            masked_img, masked_lbl, pseudo_label_region, local_hint_ratio, mix=auged_img, mask_lambda=self.mask_lambda)
-
-        # Train on masked images
-        masked_losses = []
-        for idx, masked_img in enumerate(masked_imgs):
-            masked_losses.append(model.forward_train(
-                masked_img,
-                img_metas,
-                masked_lbl,
-                seg_weight=masked_seg_weight,
-            ))
-            
-            # if self.debug and len(self.lambda_weight) > 1:
-            #     self.debug_output['Masked_{}'.format(idx)] = model.debug_output
-            #     if masked_seg_weight is not None:
-            #         self.debug_output['Masked_{}'.format(idx)]['PL Weight'] = \
-            #             masked_seg_weight.cpu().numpy()
-            if self.debug and self.consistency_mode == 'unimatch_like':
-                self.debug_output['Fused' if idx % 2 else 'Masked'] = model.debug_output
-                if masked_seg_weight is not None:
-                    self.debug_output['Fused' if idx % 2 else 'Masked']['PL Weight'] = \
-                        masked_seg_weight.cpu().numpy()
-
-        # Class and scene consistency
-        # if isinstance(self.mask_gen, DualMaskGenerator):
-        if len(masked_losses) > 1:
-            for i, weight in enumerate(self.lambda_weight):
-                for key in masked_losses[i].keys():
-                    masked_losses[i][key] *= weight
+        # 計算距離最近的src feature
+        tgt_soft_label, tgt_feat = model.generate_pseudo_label(
+            target_img, target_img_metas, return_feat=True)
         
-            masked_loss = {}
-            for key, value in masked_losses[0].items():
-                masked_loss[key] = value
+        # 生成N個擴增影像
+        target_img = denorm(
+            target_img, means[0].unsqueeze(0), stds[0].unsqueeze(0))
+        auged_imgs = self.transforms.apply_transforms(target_img, None)
 
-            return masked_loss, mask_targets, hint_patch_nums
-    
-        # original MIC
-        else:
-            masked_loss = masked_losses[0]
+        debug_imgs = {
+            'source_indice': [],
+            'topk_imgs': [],
+            'auged_imgs': [],
+        }
+        pseudo_soft_labels = torch.zeros_like(
+            pseudo_label, device=dev)
+        for B in range(tgt_feat[3].shape[0]):
+            # 找距離最近的src feature和距離值
+            queue_flat = self.source_queue.view(
+                self.source_queue.shape[0], -1).to(device=dev)
+            target_flat = tgt_feat[3][B].view(-1)
+            dist = torch.norm(queue_flat - target_flat, dim=1)
+            min_distance_idx = torch.argmin(dist)
+            closest_feature, closest_distance = \
+                self.source_queue[min_distance_idx].to(device=dev), \
+                dist[min_distance_idx].to(device=dev)
 
-            if self.mask_lambda == 0.0:
-                masked_loss['decode.loss_seg'] *= self.consistency_lambda
-            elif self.mask_lambda != 1:
-                masked_loss['decode.loss_seg'] *= self.mask_lambda
+            # 計算擴增影像的特徵和 pseudo label
+            auged_img = torch.stack(auged_imgs[B]).to(device=dev)
+            auged_img = renorm(
+                auged_img, means[0].unsqueeze(0), stds[0].unsqueeze(0))
+            logits, auged_feat = model.generate_pseudo_label(
+                auged_img, target_img_metas, return_feat=True)
+            auged_soft_label = torch.softmax(logits.detach(), dim=1)
+            del logits
+            
+            auged_flat = auged_feat[3].view(auged_feat[3].shape[0], -1)  # [size, H*W]
+            closest_feature_flat = closest_feature.view(-1)  # [H*W]
 
+            distances = torch.norm(
+                auged_flat - closest_feature_flat, dim=1)
+
+            # 过滤操作
+            mask = distances <= closest_distance
+            filtered_features = auged_feat[3][mask]
+            filtered_soft_labels = auged_soft_label[mask]
+            filtered_distances = distances[mask]
+            del auged_feat
+
+            # 找 topk 最近的特征
+            values = None
+            if len(filtered_distances) > 0:  # 确保有特征满足过滤条件
+                values, indices = torch.topk(filtered_distances, 
+                    min(self.k, len(filtered_distances)), largest=False)
+                topk_closest_features = filtered_features[indices]
+                topk_closest_soft_label = filtered_soft_labels[indices]
+
+                # apply soft-volting
+                summed_labels = topk_closest_soft_label.sum(dim=0)
+                soft_labels = summed_labels / topk_closest_soft_label.shape[0]
+            else:
+                soft_labels = pseudo_label[B]
+
+            pseudo_soft_labels[B] = torch.max(soft_labels, dim=0)[1]
+
+            # debug
             if self.debug:
-                self.debug_output['Masked'] = model.debug_output
-                if masked_seg_weight is not None:
-                    self.debug_output['Masked']['PL Weight'] = \
-                        masked_seg_weight.cpu().numpy()
-            
-            return masked_loss, mask_targets, hint_patch_nums
+                debug_imgs['auged_imgs'].append(auged_img)
+                selected_auged_imgs = auged_img[mask][indices]  # 使用 mask 后再索引以保证正确性
+                debug_imgs['topk_imgs'].append(selected_auged_imgs)
+                debug_imgs['source_indice'].append(min_distance_idx)
+
+
+        # transform to one-hot
+        # refined_pseudo_label = torch.max(pseudo_soft_labels, dim=1)
+
+        if self.debug:
+            self.debug_output['Refine'] = {
+                'Referenced_source': # for batchsize = 2
+                    torch.stack(
+                        [self.source_queue_meta[debug_imgs['source_indice'][0]],
+                        self.source_queue_meta[debug_imgs['source_indice'][1]]]),
+                'auged_imgs': debug_imgs['auged_imgs'],
+                'choised_topk_imgs': debug_imgs['topk_imgs'],
+                'org_pseudo_label': pseudo_label,
+                'refined_pseudo_label': pseudo_soft_labels
+            }
+
+        return pseudo_soft_labels, self.debug_output

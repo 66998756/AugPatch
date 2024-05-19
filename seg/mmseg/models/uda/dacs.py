@@ -33,14 +33,16 @@ from mmseg.models import UDA, HRDAEncoderDecoder, build_segmentor
 from mmseg.models.segmentors.hrda_encoder_decoder import crop
 from mmseg.models.uda.masking_consistency_module import \
     MaskingConsistencyModule
-from mmseg.models.uda.augpatch_module import \
-    AugPatchConsistencyModule
 from mmseg.models.uda.uda_decorator import UDADecorator, get_module
 from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
                                                 get_mean_std, strong_transform)
 from mmseg.models.utils.visualization import prepare_debug_out, subplotimg
 from mmseg.utils.utils import downscale_label_ratio
 
+from mmseg.models.uda.augpatch_module import \
+    AugPatchConsistencyModule
+from mmseg.models.uda.adaptive_refinement import \
+    AdaptivePseudoLabelRefinement
 
 labels = {
     0: 'road', 1: 'sidew', 2: 'build', 3: 'wall', 4: 'fence', 5: 'pole',
@@ -96,10 +98,13 @@ class DACS(UDADecorator):
         # aug config
         self.aug_mode = cfg['aug_mode']
         self.enable_augment = self.aug_mode is not None
-        # self.geometric_perturb = cfg['geometric_perturb']
+        
         # refine config
-        # self.refine_mode = cfg['refine_mode']
-        # self.enable_refine = self.refine_mode is not None
+        self.refine_cfg = cfg['refine']
+
+        self.refine = None
+        if self.refine_cfg:
+            self.refine = AdaptivePseudoLabelRefinement(None, self.refine_cfg)
 
         # other setup
         self.loss_adjustment = cfg['loss_adjustment']
@@ -421,6 +426,13 @@ class DACS(UDADecorator):
                 ema_logits)
             del ema_logits
 
+            # refine the pseudo label
+            if self.refine:
+                pseudo_label, debug_ref = self.refine(self.get_ema_model(), 
+                            img, img_metas,
+                            target_img, target_img_metas,
+                            pseudo_label, self.local_iter)
+
             pseudo_weight = self.filter_valid_pseudo_region(
                 pseudo_weight, valid_pseudo_mask)
             gt_pixel_weight = torch.ones((pseudo_weight.shape), device=dev)
@@ -611,6 +623,60 @@ class DACS(UDADecorator):
                                      f'{(self.local_iter + 1):06d}_{j}_s.png'))
                     plt.close()
                 del seg_debug
+        # refine output
+        if self.local_iter % self.debug_img_interval == 0 and debug_ref:
+            out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
+            os.makedirs(out_dir, exist_ok=True)
+            vis_ref_img = torch.clamp( # [B, C, H, W]
+                denorm(debug_ref['Referenced_source'], means, stds), 0, 1)
+            vis_trg_img = torch.clamp( # [B, C, H, W]
+                denorm(target_img, means, stds), 0, 1)
+            vis_auged_img = torch.clamp( # [B, I, C, H, W]
+                denorm(debug_ref['auged_imgs'], means, stds), 0, 1)
+            vis_topk_img = torch.clamp( # [B, I, C, H, W]
+                denorm(debug_ref['choised_topk_imgs'], means, stds), 0, 1)
+            for j in range(batch_size):
+                rows, cols = 3, max(vis_topk_img.shape[1], 4)
+                fig, axs = plt.subplots(
+                    rows,
+                    cols,
+                    figsize=(3 * cols, 3 * rows),
+                    gridspec_kw={
+                        'hspace': 0.1,
+                        'wspace': 0,
+                        'top': 0.95,
+                        'bottom': 0,
+                        'right': 1,
+                        'left': 0
+                    },
+                )
+                subplotimg(axs[0][0], vis_ref_img[j], 'Referenced Source')
+                subplotimg(axs[1][0], vis_trg_img[j], 'Target Image')
+                subplotimg(
+                    axs[2][0],
+                    debug_ref['org_pseudo_label'][j],
+                    'Original Pseudo Label',
+                    cmap='cityscapes')
+                subplotimg(
+                    axs[3][0],
+                    debug_ref['refined_pseudo_label'][j],
+                    'Refined Pseudo Label',
+                    cmap='cityscapes')
+                for x in range(vis_topk_img.shape[1]):
+                    subplotimg(
+                        axs[x][1],
+                        vis_topk_img[j][x] * 255,
+                        'Top {x} Auged Image')
+                    subplotimg(
+                        axs[x][2],
+                        vis_auged_img[j][x] * 255,
+                        '{x}-th Auged Image')
+                for ax in axs.flat:
+                    ax.axis('off')
+                plt.savefig(
+                    os.path.join(out_dir,
+                                 f'{(self.local_iter + 1):06d}_{j}_refine.png'))
+                plt.close()
         self.local_iter += 1
 
         return log_vars
