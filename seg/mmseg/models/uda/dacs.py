@@ -651,24 +651,24 @@ class DACS(UDADecorator):
                     },
                 )
                 subplotimg(axs[0][0], vis_ref_img[j], 'Referenced Source')
-                subplotimg(axs[1][0], vis_trg_img[j], 'Target Image')
+                subplotimg(axs[0][1], vis_trg_img[j], 'Target Image')
                 subplotimg(
-                    axs[2][0],
+                    axs[0][2],
                     debug_ref['org_pseudo_label'][j],
                     'Original Pseudo Label',
                     cmap='cityscapes')
                 subplotimg(
-                    axs[3][0],
+                    axs[0][3],
                     debug_ref['refined_pseudo_label'][j],
                     'Refined Pseudo Label',
                     cmap='cityscapes')
                 for x in range(vis_topk_img.shape[1]):
                     subplotimg(
-                        axs[x][1],
+                        axs[1][x],
                         vis_topk_img[j][x] * 255,
                         'Top {x} Auged Image')
                     subplotimg(
-                        axs[x][2],
+                        axs[2][x],
                         vis_auged_img[j][x] * 255,
                         '{x}-th Auged Image')
                 for ax in axs.flat:

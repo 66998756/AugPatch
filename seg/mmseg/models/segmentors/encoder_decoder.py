@@ -184,7 +184,7 @@ class EncoderDecoder(BaseSegmentor):
 
     def forward_dummy(self, img):
         """Dummy forward function."""
-        seg_logit = self.encode_decode(img, None)
+        seg_logit = self.encode_decode(img, None)[0]
 
         return seg_logit
 
@@ -312,7 +312,7 @@ class EncoderDecoder(BaseSegmentor):
                     crop_imgs.append(crop_img)
                     crops.append((y1, y2, x1, x2))
             crop_imgs = torch.cat(crop_imgs, dim=0)
-            crop_seg_logits = self.encode_decode(crop_imgs, img_meta)
+            crop_seg_logits = self.encode_decode(crop_imgs, img_meta)[0]
             for i in range(len(crops)):
                 y1, y2, x1, x2 = crops[i]
                 crop_seg_logit = \
@@ -332,7 +332,7 @@ class EncoderDecoder(BaseSegmentor):
                     y1 = max(y2 - h_crop, 0)
                     x1 = max(x2 - w_crop, 0)
                     crop_img = img[:, :, y1:y2, x1:x2]
-                    crop_seg_logit = self.encode_decode(crop_img, img_meta)
+                    crop_seg_logit = self.encode_decode(crop_img, img_meta)[0]
                     preds += F.pad(crop_seg_logit,
                                    (int(x1), int(preds.shape[3] - x2), int(y1),
                                     int(preds.shape[2] - y2)))
@@ -356,7 +356,7 @@ class EncoderDecoder(BaseSegmentor):
     def whole_inference(self, img, img_meta, rescale):
         """Inference with full image."""
 
-        seg_logit = self.encode_decode(img, img_meta)
+        seg_logit = self.encode_decode(img, img_meta)[0]
         if rescale:
             # support dynamic shape for onnx
             if torch.onnx.is_in_onnx_export():

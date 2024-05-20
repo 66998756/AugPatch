@@ -953,8 +953,8 @@ def generate_experiment_cfgs(id):
         inference = 'whole'
          
         # cityscapes to acdc (HRDA)
-        # source, target = 'cityscapes', 'acdc'
-        source, target = 'cityscapes', 'darkzurich'
+        source, target = 'cityscapes', 'acdc'
+        # source, target = 'cityscapes', 'darkzurich'
 
         # MIC setup
         mask_block_size, mask_ratio = 32, 0.7
@@ -973,7 +973,7 @@ def generate_experiment_cfgs(id):
         k = 4
         refine_aug = {'n': 2, 'm': 10}
         num_diff_ref_aug = 16
-        start_iters = 50
+        start_iters = 950
         max_bank_size = 200
 
 
