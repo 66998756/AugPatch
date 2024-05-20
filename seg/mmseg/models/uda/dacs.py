@@ -427,12 +427,12 @@ class DACS(UDADecorator):
             del ema_logits
 
             # refine the pseudo label
+            debug_ref = None
             if self.refine:
                 pseudo_label, debug_ref = self.refine(self.get_ema_model(), 
-                            img, img_metas,
-                            target_img, target_img_metas,
-                            pseudo_label, self.local_iter)
-
+                            img, img_metas, target_img, target_img_metas,
+                            pseudo_label, self.local_iter,
+                            (self.local_iter % self.debug_img_interval == 0))
             pseudo_weight = self.filter_valid_pseudo_region(
                 pseudo_weight, valid_pseudo_mask)
             gt_pixel_weight = torch.ones((pseudo_weight.shape), device=dev)
@@ -624,19 +624,20 @@ class DACS(UDADecorator):
                     plt.close()
                 del seg_debug
         # refine output
-        if self.local_iter % self.debug_img_interval == 0 and debug_ref:
+        # if self.local_iter % self.debug_img_interval == 0 and debug_ref:
+        if debug_ref:
             out_dir = os.path.join(self.train_cfg['work_dir'], 'debug')
             os.makedirs(out_dir, exist_ok=True)
             vis_ref_img = torch.clamp( # [B, C, H, W]
-                denorm(debug_ref['Referenced_source'], means, stds), 0, 1)
+                denorm(debug_ref['Referenced_source'].to(device=img.device), means, stds), 0, 1)
             vis_trg_img = torch.clamp( # [B, C, H, W]
                 denorm(target_img, means, stds), 0, 1)
-            vis_auged_img = torch.clamp( # [B, I, C, H, W]
-                denorm(debug_ref['auged_imgs'], means, stds), 0, 1)
-            vis_topk_img = torch.clamp( # [B, I, C, H, W]
-                denorm(debug_ref['choised_topk_imgs'], means, stds), 0, 1)
+            
             for j in range(batch_size):
-                rows, cols = 3, max(vis_topk_img.shape[1], 4)
+                vis_topk_img = torch.clamp( # [[ICHW], [ICHW]]
+                    denorm(debug_ref['choised_topk_imgs'][j], means[j], stds[j]), 0, 1)
+                
+                rows, cols = 3, max(vis_topk_img.shape[0], 4)
                 fig, axs = plt.subplots(
                     rows,
                     cols,
@@ -662,15 +663,20 @@ class DACS(UDADecorator):
                     debug_ref['refined_pseudo_label'][j],
                     'Refined Pseudo Label',
                     cmap='cityscapes')
-                for x in range(vis_topk_img.shape[1]):
+                for x in range(vis_topk_img.shape[0]):
                     subplotimg(
                         axs[1][x],
-                        vis_topk_img[j][x] * 255,
-                        'Top {x} Auged Image')
+                        vis_topk_img[x],
+                        f'Top {x} Auged Image')
+                    # subplotimg(
+                    #     axs[2][x],
+                    #     vis_auged_img[j][x] * 255,
+                    #     'Top {x} Auged Pred.')
                     subplotimg(
                         axs[2][x],
-                        vis_auged_img[j][x] * 255,
-                        '{x}-th Auged Image')
+                        debug_ref['choised_topk_preds'][j][x],
+                        f'Top {x} Auged Pred.',
+                        cmap='cityscapes')
                 for ax in axs.flat:
                     ax.axis('off')
                 plt.savefig(

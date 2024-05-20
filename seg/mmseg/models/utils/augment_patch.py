@@ -12,12 +12,17 @@ class Augmentations:
         self.num_diff_aug = cfg['num_diff_aug']
         self.aug_block_size = cfg['aug_block_size']
         
+        self.ignore_identity = None
+        if cfg['ignore_identity']:
+            self.ignore_identity = cfg['ignore_identity']
+        
         self.transforms = []
         for i in range(self.num_diff_aug):
             if self.aug_type == "RandAugment":
                 augmenter = RandAugment(
                     self.augment_setup['n'], 
                     self.augment_setup['m'],
+                    self.ignore_identity,
                     seed=i
                 )
 

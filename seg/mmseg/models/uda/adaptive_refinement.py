@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------
 
 import random
-import queue
+from collections import deque
 
 import torch
 from torch.nn import Module
@@ -35,6 +35,7 @@ class AdaptivePseudoLabelRefinement(Module):
         self.max_bank_size = cfg['max_bank_size']
 
         # Augmentation Setup
+        cfg['refine_aug'].update({'ignore_identity': True})
         self.transforms = Augmentations(cfg['refine_aug'])
         self.k = cfg['k']
 
@@ -44,7 +45,7 @@ class AdaptivePseudoLabelRefinement(Module):
 
         # 每個item有四個不同等級的特徵，詳見 SegFormer
         self.source_queue = torch.zeros(self.max_bank_size, 512, 16, 16)
-        self.source_queue_meta = queue.Queue(maxsize=self.max_bank_size)
+        self.source_queue_meta = deque(maxlen=self.max_bank_size)
         # self.target_memoqueue = torch.zeros(self.max_bank_size, 512, 16)
 
         self.debug = False
@@ -80,9 +81,8 @@ class AdaptivePseudoLabelRefinement(Module):
             # 直接添加新特征
             queue = torch.cat((queue, new_feature), dim=0)
 
-        if self.source_queue_meta.full():
-            _ = self.source_queue_meta.get()
-        self.source_queue_meta.put(img)
+        for idx in range(img.shape[0]):
+            self.source_queue_meta.append(img[idx])
         
         return queue
 
@@ -106,8 +106,10 @@ class AdaptivePseudoLabelRefinement(Module):
                  target_img,
                  target_img_metas,
                  pseudo_label=None,
-                 local_iter=None):
-        self.update_debug_state(model)
+                 local_iter=None,
+                 debug=False):
+        # self.update_debug_state(model)
+        self.debug = debug
         self.debug_output = {}
         model.debug_output = {}
         dev = img.device
@@ -192,6 +194,7 @@ class AdaptivePseudoLabelRefinement(Module):
         debug_imgs = {
             'source_indice': [],
             'topk_imgs': [],
+            'topk_preds': [],
             'auged_imgs': [],
         }
         pseudo_soft_labels = torch.zeros_like(
@@ -250,20 +253,22 @@ class AdaptivePseudoLabelRefinement(Module):
                 debug_imgs['auged_imgs'].append(auged_img)
                 selected_auged_imgs = auged_img[mask][indices]  # 使用 mask 后再索引以保证正确性
                 debug_imgs['topk_imgs'].append(selected_auged_imgs)
+                topk_pred = torch.max(topk_closest_soft_label, dim=1)[1]
+                debug_imgs['topk_preds'].append(topk_pred)
                 debug_imgs['source_indice'].append(min_distance_idx)
-
 
         # transform to one-hot
         # refined_pseudo_label = torch.max(pseudo_soft_labels, dim=1)
 
         if self.debug:
-            self.debug_output['Refine'] = {
+            self.debug_output = {
                 'Referenced_source': # for batchsize = 2
                     torch.stack(
                         [self.source_queue_meta[debug_imgs['source_indice'][0]],
                         self.source_queue_meta[debug_imgs['source_indice'][1]]]),
                 'auged_imgs': debug_imgs['auged_imgs'],
                 'choised_topk_imgs': debug_imgs['topk_imgs'],
+                'choised_topk_preds': debug_imgs['topk_preds'],
                 'org_pseudo_label': pseudo_label,
                 'refined_pseudo_label': pseudo_soft_labels
             }

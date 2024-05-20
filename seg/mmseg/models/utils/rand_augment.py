@@ -122,8 +122,7 @@ def Sharpness(img, v):  # [0.1,1.9]
 def Identity(img, v):
     return img
 
-
-def augment_list():  # 16 oeprations and their ranges
+def augment_list(ignore_identity):  # 16 oeprations and their ranges
     # 這裡把所有變形的全註解
     l = [
         (Identity, 0., 1.0),
@@ -138,15 +137,28 @@ def augment_list():  # 16 oeprations and their ranges
         (Sharpness, 0.1, 1.9),  # 13
     ]
 
+    if ignore_identity:
+        l = [
+            (AutoContrast, 0, 1),  # 5
+            (Invert, 0, 1),  # 6
+            (Equalize, 0, 1),  # 7
+            (Solarize, 0, 110),  # 8
+            (Posterize, 4, 8),  # 9
+            (Contrast, 0.1, 1.9),  # 10
+            (Color, 0.1, 1.9),  # 11
+            (Brightness, 0.1, 1.9),  # 12
+            (Sharpness, 0.1, 1.9),  # 13
+        ]
+
     return l
 
 
 class RandAugment:
-    def __init__(self, n, m, seed):
+    def __init__(self, n, m, ignore_identity, seed):
         self.n = n
         self.m = m      # [0, 30]
         self.seed = seed
-        self.augment_list = augment_list()
+        self.augment_list = augment_list(ignore_identity)
 
     def __call__(self, img, basic_aug_param=None):
         random.seed(self.seed)

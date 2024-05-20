@@ -31,6 +31,8 @@ class AugPatchConsistencyModule(Module):
         self.aug_alpha = cfg['aug_alpha']
         self.aug_pseudo_threshold = cfg['aug_pseudo_threshold']
         self.aug_lambda = cfg['aug_lambda']
+
+        cfg['aug_generator'].update({'ignore_identity': None})
         self.transforms = Augmentations(cfg['aug_generator'])
 
         self.geometric_perturb = cfg['geometric_perturb']
@@ -128,6 +130,7 @@ class AugPatchConsistencyModule(Module):
         elif self.aug_mode in ['separatetrg', 'separatetrgaug', 'separatetrgaugAugPatch']:
             auged_img = target_img
             auged_lbl = auged_plabel.unsqueeze(1)
+            # auged_lbl = auged_plabel
             auged_seg_weight = auged_pweight
         else:
             raise NotImplementedError(self.aug_mode)
@@ -161,6 +164,7 @@ class AugPatchConsistencyModule(Module):
                 valid_mask_region = pseudo_weight.clone().bool()
             else:
                 valid_mask_region = (~ pseudo_weight.clone().bool())
+            valid_mask_region = valid_mask_region.unsqueeze(dim=1)
         else:
             valid_mask_region = valid_pseudo_mask.clone()
 
@@ -168,7 +172,7 @@ class AugPatchConsistencyModule(Module):
         mask_targets = None
         if self.cls_mask:
             auged_img, mask_targets = self.cls_mask.mask_image(
-                auged_img, auged_lbl, valid_mask_region.unsqueeze(dim=1))
+                auged_img, auged_lbl, valid_mask_region)
             
         # Apply random patch geometric perturb
         if self.geometric_perturb:

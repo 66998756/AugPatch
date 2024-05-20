@@ -301,6 +301,7 @@ def generate_experiment_cfgs(id):
             cfg['uda']['aug_mode'] = None
 
         # Self-voting setup
+        cfg['uda']['refine'] = None
         if enable_refine:
             refine_cfg = {
                 'k': k,
@@ -308,16 +309,11 @@ def generate_experiment_cfgs(id):
                     'type': 'RandAugment',
                     'augment_setup': refine_aug,
                     'num_diff_aug': num_diff_ref_aug,
-                    'aug_block_size': 0
-                },
+                    'aug_block_size': 0},
                 'start_iters': start_iters,
-                'max_bank_size': max_bank_size
-            }
+                'max_bank_size': max_bank_size}
             cfg['uda']['refine'] = refine_cfg
-        else:
-            cfg['uda']['refine'] = None
-
-
+        
         # 其他 Setup
         cfg['uda']['cls_mask'] = cls_mask
         cfg['uda']['loss_adjustment'] = loss_adjustment
@@ -454,9 +450,13 @@ def generate_experiment_cfgs(id):
     # Self-voting setup
     enable_refine = False
     k = 4
-    refine_aug = {'n': 4, 'm': 10}
-    start_iters = 1500
-    max_bank_size = 200
+    refine_aug = {'n': 2, 'm': 10}
+    num_diff_ref_aug = 16
+    # 從1500 iter 開始儲存，在2000 iter開始進行refine
+    # 開始儲存最新feature的時間點是 
+    # start_iters - (max_bank_size / batch size)
+    start_iters = 2000
+    max_bank_size = 1000
 
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
@@ -971,13 +971,18 @@ def generate_experiment_cfgs(id):
         # Self-voting setup
         enable_refine = True
         k = 4
-        refine_aug = {'n': 2, 'm': 10}
+        refine_aug = {'n': 4, 'm': 10}
         num_diff_ref_aug = 16
-        start_iters = 950
-        max_bank_size = 200
-
+        # 從1500 iter 開始儲存，在2000 iter開始進行refine
+        # 開始儲存最新feature的時間點是 
+        # start_iters - (max_bank_size / batch size)
+        start_iters = 2000
+        max_bank_size = 1000
+        # start_iters = 20
+        # max_bank_size = 200
 
         for loss_adjustment, geometric_perturb, cls_mask in [
+            (False,          False,             'Random'),
             (False,          True,              'Random'),
             (True,           True,              'Random'),
 
@@ -988,12 +993,65 @@ def generate_experiment_cfgs(id):
             (True,           False,             False),
 
             (False,          False,             False),
-            (False,          False,             'Random'),
         ]:
             for seed in seeds:
                 gpu_model = 'NVIDIAA40'
                 # balance lambda
                 aug_lambda = 0.5 if loss_adjustment else 1.0
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                plcrop = True # 不知道為什麼設成True比較好
+                cfg = config_from_vars()
+                cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # 碩論 with HRDA for Different UDA Benchmarks (Table 2)
+    # -------------------------------------------------------------------------
+    # yapf: disable
+    if id == 93:
+        seeds = [0, 1, 2]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
+        mask_block_size, mask_ratio = 64, 0.7
+
+        # MIC setup
+        mask_lambda = 0.5
+        mask_mode = 'separatetrgaug'
+
+        # AugPatch setup
+        aug_mode = 'separatetrgaug'
+        aug_lambda = 0.5
+        aug_block_size = 64
+        num_diff_aug = 16
+        augment_setup = {'n': 8, 'm': 30}
+        cls_mask = 'Random'
+        geometric_perturb = True
+
+        loss_adjustment = True
+
+        # Self-voting setup
+        enable_refine = True
+        k = 4
+        refine_aug = {'n': 2, 'm': 10}
+        num_diff_ref_aug = 16
+        # 從1500 iter 開始儲存，在2000 iter開始進行refine
+        # 開始儲存最新feature的時間點是 
+        # start_iters - (max_bank_size / batch size)
+        start_iters = 2000
+        max_bank_size = 1000
+
+        for seed in seeds:
+            for source,          target in [
+                ('gtaHR',        'cityscapesHR'),
+                ('synthiaHR',    'cityscapesHR'),
+                # ('cityscapesHR', 'acdcHR',       'separate'),
+                # ('cityscapesHR', 'darkzurichHR', 'separate'),
+                ('cityscapesHR', 'acdcHR'),
+                ('cityscapesHR', 'darkzurichHR'),
+            ]:
+                gpu_model = 'NVIDIATITANRTX'
                 # plcrop is only necessary for Cityscapes as target domains
                 # ACDC and DarkZurich have no rectification artifacts.
                 plcrop = 'v2' if 'cityscapes' in target else False

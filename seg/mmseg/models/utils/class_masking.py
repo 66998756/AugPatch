@@ -31,6 +31,7 @@ class ClassMaskGenerator:
     @torch.no_grad()
     def generate_mask(self, imgs, lbls, pseudo_label_region):
         B, C, H, W = imgs.shape
+        
         ### Implement of Class Masking ###
         input_mask = torch.zeros((B, 1, H, W), device=imgs.device)
 
