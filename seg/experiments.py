@@ -311,7 +311,8 @@ def generate_experiment_cfgs(id):
                     'num_diff_aug': num_diff_ref_aug,
                     'aug_block_size': 0},
                 'start_iters': start_iters,
-                'max_bank_size': max_bank_size}
+                'max_bank_size': max_bank_size,
+                'refine_conf': refine_conf}
             cfg['uda']['refine'] = refine_cfg
         
         # 其他 Setup
@@ -457,6 +458,8 @@ def generate_experiment_cfgs(id):
     # start_iters - (max_bank_size / batch size)
     start_iters = 2000
     max_bank_size = 1000
+    # MIC like
+    refine_conf = 0.968
 
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
@@ -803,8 +806,8 @@ def generate_experiment_cfgs(id):
         inference = 'whole'
          
         # cityscapes to acdc (HRDA)
-        # source, target = 'cityscapes', 'acdc'
-        source, target = 'cityscapes', 'darkzurich'
+        source, target = 'cityscapes', 'acdc'
+        # source, target = 'cityscapes', 'darkzurich'
 
         # MIC setup
         mask_block_size, mask_ratio = 32, 0.7
@@ -816,9 +819,18 @@ def generate_experiment_cfgs(id):
         aug_lambda = 1.0
         aug_block_size = 32
         num_diff_aug = 16
-        augment_setup={'n': 4, 'm': 10}
+        augment_setup={'n': 8, 'm': 30}
+
+        # Self-voting setup
+        enable_refine = True
+        k = 5
+        refine_aug = {'n': 2, 'm': 'random'}
+        num_diff_ref_aug = 32
+        start_iters = 1500
+        max_bank_size = 1000
 
         for loss_adjustment, geometric_perturb, cls_mask in [
+            (False,          False,             'Random'),
             (False,          True,              'Random'),
             (True,           True,              'Random'),
 
@@ -829,7 +841,6 @@ def generate_experiment_cfgs(id):
             (True,           False,             False),
 
             (False,          False,             False),
-            (False,          False,             'Random'),
         ]:
             for seed in seeds:
                 gpu_model = 'NVIDIAA40'
@@ -838,6 +849,7 @@ def generate_experiment_cfgs(id):
                 # plcrop is only necessary for Cityscapes as target domains
                 # ACDC and DarkZurich have no rectification artifacts.
                 plcrop = 'v2' if 'cityscapes' in target else False
+                plcrop = True
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -970,9 +982,9 @@ def generate_experiment_cfgs(id):
 
         # Self-voting setup
         enable_refine = True
-        k = 4
+        k = 5
         refine_aug = {'n': 4, 'm': 10}
-        num_diff_ref_aug = 16
+        num_diff_ref_aug = 32
         # 從1500 iter 開始儲存，在2000 iter開始進行refine
         # 開始儲存最新feature的時間點是 
         # start_iters - (max_bank_size / batch size)
@@ -1008,12 +1020,17 @@ def generate_experiment_cfgs(id):
     # 碩論 with HRDA for Different UDA Benchmarks (Table 2)
     # -------------------------------------------------------------------------
     # yapf: disable
-    if id == 93:
+    elif id == 93:
         seeds = [0, 1, 2]
         architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
         uda, rcs_T = 'dacs_a999_fdthings', 0.01
         crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
         inference = 'slide'
+
+        adamw = ('adamw', 0.00006, 'poly10warm', True)
+        uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
+        uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_hrda
+
         mask_block_size, mask_ratio = 64, 0.7
 
         # MIC setup
@@ -1022,41 +1039,47 @@ def generate_experiment_cfgs(id):
 
         # AugPatch setup
         aug_mode = 'separatetrgaug'
-        aug_lambda = 0.5
+        aug_lambda = 1.0
         aug_block_size = 64
         num_diff_aug = 16
-        augment_setup = {'n': 8, 'm': 30}
+        augment_setup = {'n': 4, 'm': 10}
         cls_mask = 'Random'
         geometric_perturb = True
 
-        loss_adjustment = True
+        loss_adjustment = False
 
         # Self-voting setup
-        enable_refine = True
-        k = 4
-        refine_aug = {'n': 2, 'm': 10}
-        num_diff_ref_aug = 16
+        enable_refine = False
+        k = 5
+        refine_aug = {'n': 4, 'm': 10}
+        num_diff_ref_aug = 32
         # 從1500 iter 開始儲存，在2000 iter開始進行refine
         # 開始儲存最新feature的時間點是 
         # start_iters - (max_bank_size / batch size)
         start_iters = 2000
+        # start_iters = 20
         max_bank_size = 1000
 
         for seed in seeds:
-            for source,          target in [
-                ('gtaHR',        'cityscapesHR'),
-                ('synthiaHR',    'cityscapesHR'),
-                # ('cityscapesHR', 'acdcHR',       'separate'),
-                # ('cityscapesHR', 'darkzurichHR', 'separate'),
-                ('cityscapesHR', 'acdcHR'),
-                ('cityscapesHR', 'darkzurichHR'),
+            for mask_mode in [
+                # 'separatetrgaug',
+                None
             ]:
-                gpu_model = 'NVIDIATITANRTX'
-                # plcrop is only necessary for Cityscapes as target domains
-                # ACDC and DarkZurich have no rectification artifacts.
-                plcrop = 'v2' if 'cityscapes' in target else False
-                cfg = config_from_vars()
-                cfgs.append(cfg)
+                for source,          target in [
+                    ('gtaHR',        'cityscapesHR'),
+                    ('synthiaHR',    'cityscapesHR'),
+                    # ('cityscapesHR', 'acdcHR',       'separate'),
+                    # ('cityscapesHR', 'darkzurichHR', 'separate'),
+                    ('cityscapesHR', 'acdcHR'),
+                    ('cityscapesHR', 'darkzurichHR'),
+                ]:
+                    gpu_model = 'NVIDIATITANRTX'
+                    # plcrop is only necessary for Cityscapes as target domains
+                    # ACDC and DarkZurich have no rectification artifacts.
+                    # plcrop = 'v2' if 'cityscapes' in target else False
+                    plcrop = 'v2'
+                    cfg = config_from_vars()
+                    cfgs.append(cfg)
     else:
         raise NotImplementedError('Unknown id {}'.format(id))
 

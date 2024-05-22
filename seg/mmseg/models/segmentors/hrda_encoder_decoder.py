@@ -164,14 +164,16 @@ class HRDAEncoderDecoder(EncoderDecoder):
             scaled_img = self.resize(img, self.feature_scale)
             return self.extract_unscaled_feat(scaled_img)
 
-    def generate_pseudo_label(self, img, img_metas):
+    def generate_pseudo_label(self, img, img_metas, return_feat=False):
         self.update_debug_state()
-        out = self.encode_decode(img, img_metas)
+        out, feat = self.encode_decode(img, img_metas, True, return_feat)
         if self.debug:
             self.debug_output = self.decode_head.debug_output
+        if return_feat:
+            return out, feat
         return out
 
-    def encode_decode(self, img, img_metas, upscale_pred=True):
+    def encode_decode(self, img, img_metas, upscale_pred=True, return_feat=False):
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
         mres_feats = []
@@ -195,7 +197,9 @@ class HRDAEncoderDecoder(EncoderDecoder):
                 size=img.shape[2:],
                 mode='bilinear',
                 align_corners=self.align_corners)
-        return out
+        if return_feat:
+            return out, mres_feats
+        return out, None
 
     def _forward_train_features(self, img):
         mres_feats = []

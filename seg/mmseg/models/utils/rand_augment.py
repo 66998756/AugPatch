@@ -157,20 +157,26 @@ class RandAugment:
     def __init__(self, n, m, ignore_identity, seed):
         self.n = n
         self.m = m      # [0, 30]
+        if self.m == 'random':
+            self.m = random.randint(10, 20)
         self.seed = seed
         self.augment_list = augment_list(ignore_identity)
 
-    def __call__(self, img, basic_aug_param=None):
-        random.seed(self.seed)
+    def __call__(self, img, means, stds, basic_aug_param=None):
+        # random.seed(self.seed)
         d = img.device
 
         if basic_aug_param:
             aug = basic_aug()
             img = aug.apply_basic_aug(img, basic_aug_param)
-        img = F.to_pil_image(img)
+
+        img = denorm(img, means[0].unsqueeze(0), stds[0].unsqueeze(0))
+        img = F.to_pil_image(img.squeeze())
         ops = random.choices(self.augment_list, k=self.n)
         for op, minval, maxval in ops:
             val = (float(self.m) / 30) * float(maxval - minval) + minval
             img = op(img, val)
-
-        return F.to_tensor(img).to(d)
+        
+        img = F.to_tensor(img).to(d).unsqueeze(dim=0)
+        img = renorm(img, means[0].unsqueeze(0), stds[0].unsqueeze(0))
+        return img

@@ -29,21 +29,20 @@ class Augmentations:
             self.transforms.append(augmenter)
 
     @torch.no_grad()
-    def apply_transforms(self, imgs, basic_aug_param):
+    def apply_transforms(self, imgs, means, stds, basic_aug_param):
         auged_imgs = []
         for batch_idx in range(imgs.shape[0]):
             # 由於 RandAug 是 PIL based 的所以只能迴圈處理
             batched_auged_img = []
             for transform in self.transforms:    
-                auged_img = transform(imgs[batch_idx], basic_aug_param)
+                auged_img = transform(imgs[batch_idx], means, stds, basic_aug_param)
                 batched_auged_img.append(auged_img)
             auged_imgs.append(batched_auged_img)
         return auged_imgs
     
     @torch.no_grad()
     def generate_augpatch(self, imgs, means, stds, basic_aug_param=None):
-        imgs = denorm(imgs, means[0].unsqueeze(0), stds[0].unsqueeze(0))
-        auged_imgs = self.apply_transforms(imgs, basic_aug_param)
+        auged_imgs = self.apply_transforms(imgs, means, stds, basic_aug_param)
 
         B, C, H, W = imgs.shape
         mshap = 1, 1, round(H / self.aug_block_size), round(W / self.aug_block_size)

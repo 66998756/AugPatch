@@ -20,10 +20,10 @@ from mmseg.models.utils.augment_patch import Augmentations
 # from mmseg.models.utils.masking_transforms import DualMaskGenerator, ClassMaskGenerator, SceneMaskGenerator
 
 
-class AdaptivePseudoLabelRefinement(Module):
+class IntrinsicAugmentRefine(Module):
 
     def __init__(self, require_teacher, cfg):
-        super(AdaptivePseudoLabelRefinement, self).__init__()
+        super(IntrinsicAugmentRefine, self).__init__()
 
         self.start_iters = cfg['start_iters']
         self.max_bank_size = cfg['max_bank_size']
@@ -45,13 +45,17 @@ class AdaptivePseudoLabelRefinement(Module):
                     'hue': 0.2,
                 },
                 'color_jitter_p': 0.5,
-                'blur': random.uniform(0, 1),
+                'blur': 0,
             }
 
-        # 每個item有四個不同等級的特徵，詳見 SegFormer
-        self.source_queue = torch.zeros(self.max_bank_size, 512, 16, 16)
-        self.source_queue_meta = deque(maxlen=self.max_bank_size)
-        # self.target_memoqueue = torch.zeros(self.max_bank_size, 512, 16)
+        # max size for cityscapes
+        self.source_dataset = {
+            'imgs': [],
+            'imgs_meta': [],
+            'imgs_feat': [],
+            'imgs_gt': [],
+            'len': 0
+        }
 
         self.debug = False
         self.debug_output = {}
@@ -108,10 +112,11 @@ class AdaptivePseudoLabelRefinement(Module):
                  model,
                  img,
                  img_metas,
+                 gt_semantic_seg,
                  target_img,
                  target_img_metas,
                  src_feat,
-                 pseudo_label=None,
+                 pseudo_label=None, # [2, 512, 512]
                  local_iter=None,
                  debug=False):
         # self.update_debug_state(model)
@@ -121,19 +126,62 @@ class AdaptivePseudoLabelRefinement(Module):
         dev = img.device
         means, stds = get_mean_std(img_metas, dev)
 
+        # cityscapes dataset size
+        if  self.source_dataset['len'] < 2975:
+            self.source_dataset['imgs'].append(img.clone().cpu())
+            self.source_dataset['imgs_meta'].append(img_metas)
+            self.source_dataset['imgs_feat'].append(src_feat[3].clone().cpu())
+            self.source_dataset['imgs_gt'].append(gt_semantic_seg.clone().cpu())
+            self.source_dataset['len'] += img.shape[0]
+
         ### Self-volting memory bank setup
         # src_feat = model.extract_feat(img)
         # 暫時只取最高級特徵
         # print(src_feat[3].shape)
-        self.source_queue = self.update_memo_queue(
-            self.source_queue.to(device=dev), 
-            src_feat[3], 
-            img.cpu().detach().clone()
-        ).to(device='cpu')
-
+        # self.source_queue = self.update_memo_queue(
+        #     self.source_queue.to(device=dev), 
+        #     src_feat[3], 
+        #     img.cpu().detach().clone()
+        # ).to(device='cpu')
         # Warm up
         if local_iter < self.start_iters:
             return pseudo_label, None
+        
+
+        # 將list中的tensors堆疊成一個新的tensor
+        stacked_tensors = torch.stack(self.source_dataset['imgs_gt'], dim=0).to(device=dev, dtype=pseudo_label.dtype)  # Shape: [Size, B, 1, H, W]
+
+        # 將target調整形狀以匹配stacked_tensors的維度
+        expanded_target = pseudo_label.unsqueeze(0).unsqueeze(2)  # Shape: [1, B, 1, H, W]
+
+        # 計算mask來忽略數值為255的位置
+        mask = (stacked_tensors != 255)  # Shape: [Size, B, 1, H, W]
+
+        # 執行條件式計算：只有當mask為True時才計算差異
+        differences = torch.where(mask, stacked_tensors - expanded_target, 
+                                  torch.tensor(0, dtype=int).to(dev))
+
+        # 計算每個tensor與目標的Hamming距離
+        hamming_distances = differences.bool().abs().sum(dim=(1, 2, 3, 4))  # Shape: [Size]
+
+        # 計算有效的數值計數來進行正規化
+        valid_counts = mask.float().sum(dim=(1, 2, 3, 4))  # Shape: [Size]
+
+        # 進行正規化計算
+        normalized_distances = hamming_distances / valid_counts
+
+        # 找到最小距離的索引
+        min_distance_idx = torch.argmin(normalized_distances)
+
+        # 取得對應的最近的tensor
+        # closest_tensor = tensor_list[min_distance_idx]
+        # print(min_distance_idx)
+
+        anchor_imgs = self.source_dataset['imgs'] \
+            [min_distance_idx.item()].to(device=dev)
+        # anchor_metas = self.source_dataset['imgs_meta'][min_distance_idx.item()]
+        anchor_feat = self.source_dataset['imgs_feat'] \
+            [min_distance_idx.item()].to(device=dev)
 
         # 計算target img 的feature 和 predict 以製作mask
         # HRDA: tgt_feat = [feature, boxes], d=[4, dict]
@@ -149,13 +197,11 @@ class AdaptivePseudoLabelRefinement(Module):
             tgt_feat = tgt_feat[0]
 
         # 生成N個擴增影像
-        target_img = denorm(
-            target_img, means[0].unsqueeze(0), stds[0].unsqueeze(0))
         self.strong_parameters.update({
                 'mean': means[0].unsqueeze(0),
                 'std': stds[0].unsqueeze(0)})
         auged_imgs = self.transforms.apply_transforms(
-            target_img, self.strong_parameters)
+            target_img, means, stds, self.strong_parameters)
 
         debug_imgs = {
             'source_indice': [],
@@ -167,20 +213,14 @@ class AdaptivePseudoLabelRefinement(Module):
             pseudo_label, device=dev)
         for B in range(tgt_feat[3].shape[0]):
             # 找距離最近的src feature和距離值
-            queue_flat = self.source_queue.view(
-                self.source_queue.shape[0], -1).to(device=dev)
-            target_flat = tgt_feat[3][B].view(-1)
-            dist = torch.norm(queue_flat - target_flat, dim=1)
-            min_distance_idx = torch.argmin(dist)
-            closest_feature, closest_distance = \
-                self.source_queue[min_distance_idx].to(device=dev), \
-                dist[min_distance_idx].to(device=dev)
+            anchor_flat = anchor_feat[B].view(1, -1)
+            target_flat = tgt_feat[3][B].view(1, -1)
+            dist_threshold = torch.norm(anchor_flat - target_flat,p=2, dim=1)
+            # dist_threshold = anchor_dist.mean()
 
             # 計算擴增影像的特徵和 pseudo label
-            auged_img = torch.stack(auged_imgs[B]).to(device=dev)
-            auged_img = renorm(
-                auged_img, means[0].unsqueeze(0), stds[0].unsqueeze(0))
-            
+            auged_img = torch.stack(auged_imgs[B]).to(device=dev).squeeze()
+            # print(auged_img.shape)
             # hrda 直接塞A40會OOM，改用mini-batch
             if hrda_backbone:
                 logits, auged_feat = [], []
@@ -200,17 +240,19 @@ class AdaptivePseudoLabelRefinement(Module):
             auged_soft_label = torch.softmax(logits.detach(), dim=1)
             del logits
             
+            # 計算距離
+            anchor_flat = anchor_feat[B].unsqueeze(dim=0)
+            anchor_flat = anchor_flat.view(1, -1)
             auged_flat = auged_feat.view(auged_feat.shape[0], -1)  # [size, H*W]
-            closest_feature_flat = closest_feature.view(-1)  # [H*W]
 
-            distances = torch.norm(
-                auged_flat - closest_feature_flat, dim=1)
+            distances = torch.norm(anchor_flat - auged_flat, p=2, dim=1)  # 计算沿最后一个维度
 
             # 过滤操作
-            mask = distances <= closest_distance
-            filtered_features = auged_feat[mask]
+            mask = distances <= dist_threshold
+            # filtered_features = auged_feat[mask]
             filtered_soft_labels = auged_soft_label[mask]
             filtered_distances = distances[mask]
+            filtered_imgs = auged_img[mask]
             del auged_feat
 
             # 找 topk 最近的特征
@@ -218,14 +260,15 @@ class AdaptivePseudoLabelRefinement(Module):
             if len(filtered_distances) > 0:  # 确保有特征满足过滤条件
                 values, indices = torch.topk(filtered_distances, 
                     min(self.k, len(filtered_distances)), largest=False)
-                topk_closest_features = filtered_features[indices]
+                # topk_closest_features = filtered_features[indices]
                 topk_closest_soft_label = filtered_soft_labels[indices]
+                topk_auged_imgs = filtered_imgs[indices]
 
                 # apply soft-volting
                 summed_labels = topk_closest_soft_label.sum(dim=0)
                 soft_labels = summed_labels / topk_closest_soft_label.shape[0]
             else:
-                soft_labels = pseudo_label[B]
+                soft_labels = pseudo_label[B].unsqueeze(0)
 
             pseudo_soft_labels[B] = torch.max(soft_labels, dim=0)[1]
 
@@ -233,8 +276,7 @@ class AdaptivePseudoLabelRefinement(Module):
             if self.debug:
                 debug_imgs['auged_imgs'].append(auged_img)
                 if indices is not None:
-                    selected_auged_imgs = auged_img[mask][indices]  # 使用 mask 后再索引以保证正确性
-                    debug_imgs['topk_imgs'].append(selected_auged_imgs)
+                    debug_imgs['topk_imgs'].append(topk_auged_imgs)
                     topk_pred = torch.max(topk_closest_soft_label, dim=1)[1]
                     debug_imgs['topk_preds'].append(topk_pred)
                 debug_imgs['source_indice'].append(min_distance_idx)
@@ -242,13 +284,12 @@ class AdaptivePseudoLabelRefinement(Module):
         # 依照threshold 貼上 refine pixel
         refined_pseudo_label = torch.where(
             pseudo_mask.squeeze(), pseudo_soft_labels, pseudo_label)
+        # print(soft_labels)
+        # print(refined_pseudo_label)
 
         if self.debug:
             self.debug_output = {
-                'Referenced_source': # for batchsize = 2
-                    torch.stack(
-                        [self.source_queue_meta[debug_imgs['source_indice'][0]],
-                        self.source_queue_meta[debug_imgs['source_indice'][1]]]),
+                'Referenced_source': anchor_imgs,
                 'auged_imgs': debug_imgs['auged_imgs'],
                 'choised_topk_imgs': debug_imgs['topk_imgs'],
                 'choised_topk_preds': debug_imgs['topk_preds'],
