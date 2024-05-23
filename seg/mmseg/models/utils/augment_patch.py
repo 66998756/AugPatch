@@ -59,5 +59,4 @@ class Augmentations:
                 imgs[batch][augment_indice == target] = \
                     auged_img[augment_indice == target]
 
-        imgs = renorm(imgs, means[0].unsqueeze(0), stds[0].unsqueeze(0))
         return imgs

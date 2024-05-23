@@ -728,61 +728,57 @@ def generate_experiment_cfgs(id):
         sgd   = ('sgd',   0.0025,  'poly10warm', False)
         adamw = ('adamw', 0.00006, 'poly10warm', True)
         #               uda,                  rcs_T, plcrop, opt_hp
-        uda_advseg =   ('advseg',             None,  False,  *sgd)
-        uda_minent =   ('minent',             None,  False,  *sgd)
-        uda_dacs =     ('dacs',               None,  False,  *adamw)
-        uda_daformer = ('dacs_a999_fdthings', 0.01,  True,   *adamw)
-        uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
-        
-        # Masking Detail setting
-        # mask_mode = 'separatetrgaug'
-        mask_mode = None
-        mask_ratio = 0.7
-        mask_lambda = 0.5
+        uda_daformer = ('dacs_a999_fdthings', 0.01,  False,   *adamw)
 
-        # AugPatch Detail setting
+        uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_daformer
+
+        architecture = 'daformer_sepaspp'
+        rcs_min_crop = 0.5
+        backbone = 'mitb5'
+
+        gpu_model = 'NVIDIAGeForceRTX2080Ti'
+        inference = 'whole'
+         
+        # cityscapes to acdc
+        source, target = 'cityscapes', 'acdc'
+
+        # MIC setup
+        mask_block_size, mask_ratio = 32, 0.7
+        mask_lambda = 1.0
+        mask_mode = 'separatetrgaug'
+
+        # AugPatch setup
         aug_mode = 'separatetrgaug'
-        aug_alpha = 'same'
-        aug_pseudo_threshold = 'same'
         aug_lambda = 1.0
-        # aug_generator setup
-        aug_type = 'RandAugment'
-        augment_setup={'n': 8, 'm': 30}
-        num_diff_aug=16
-        aug_block_size=32,
-        # apply class masking
-        cls_mask = 'Random'
-        geometric_perturb = False
+        aug_block_size = 32
+        num_diff_aug = 8
+        augment_setup={'n': 3, 'm': 10}
 
-        # consistency setup
-        loss_adjustment = False
+        loss_adjustment = 2
 
-        for architecture,                      backbone,  uda_hp in [
-            # ('dlv2red',                        'r101v1c', uda_advseg),
-            # ('dlv2red',                        'r101v1c', uda_minent),
-            # ('dlv2red',                        'r101v1c', uda_dacs),
-            # ('dlv2red',                        'r101v1c', uda_daformer),
-            # ('hrda1-512-0.1_dlv2red',          'r101v1c', uda_hrda),
-            ('daformer_sepaspp',               'mitb5',   uda_daformer),
-            # ('hrda1-512-0.1_daformer_sepaspp', 'mibt5',   uda_hrda),  # already run in exp 80
+        # Self-voting setup
+        enable_refine = False
+
+        for loss_adjustment, geometric_perturb, cls_mask in [
+            (True,           False,             'Random'),
+            (True,           True,              'Random'),
+            (True,           True,               False),
+
+            # (False,          True,              False),
+            # (True,           False,             False),
+
+            # (False,          False,             False),
+            # (False,          False,             'Random'),
+            # (False,          True,              'Random'),
+            # (True,           True,              'Random'),
         ]:
-            if 'hrda' in architecture:
-                source, target, crop = 'gtaHR', 'cityscapesHR', '1024x1024'
-                rcs_min_crop = 0.5 * (2 ** 2)
-                gpu_model = 'NVIDIATITANRTX'
-                inference = 'slide'
-                mask_block_size = 64
-            else:
-                # source, target, crop = 'gta', 'cityscapes', '512x512'
-                source, target, crop = 'cityscapes', 'acdc', '512x512'
-                rcs_min_crop = 0.5
-                gpu_model = 'NVIDIAGeForceRTX2080Ti'
-                inference = 'whole'
-                # Use half the patch size when training with half resolution
-                mask_block_size = 32
-
             for seed in seeds:
-                uda, rcs_T, plcrop, opt, lr, schedule, pmult = uda_hp
+                gpu_model = 'NVIDIAA40'
+                # balance lambda
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                plcrop = True
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -812,44 +808,35 @@ def generate_experiment_cfgs(id):
         # MIC setup
         mask_block_size, mask_ratio = 32, 0.7
         mask_lambda = 0.5
-        mask_mode = 'separatetrgaug'
+        mask_mode = None
 
         # AugPatch setup
         aug_mode = 'separatetrgaug'
         aug_lambda = 1.0
         aug_block_size = 32
-        num_diff_aug = 16
+        num_diff_aug = 8
         augment_setup={'n': 8, 'm': 30}
 
         # Self-voting setup
-        enable_refine = True
-        k = 5
-        refine_aug = {'n': 2, 'm': 'random'}
-        num_diff_ref_aug = 32
-        start_iters = 1500
-        max_bank_size = 1000
+        enable_refine = False
 
-        for loss_adjustment, geometric_perturb, cls_mask in [
-            (False,          False,             'Random'),
-            (False,          True,              'Random'),
-            (True,           True,              'Random'),
+        geometric_perturb = True
+        cls_mask = 'Random'
 
-            (True,           True,              False),
-            (True,           False,             'Random'),
-
-            (False,          True,              False),
-            (True,           False,             False),
-
-            (False,          False,             False),
+        for aug_mode in [
+            ('separateaug'),
+            ('separatetrgaug'),
+            # ('separatesrcaug')
         ]:
+            mask_mode = aug_mode
+            loss_adjustment = 1.5
             for seed in seeds:
                 gpu_model = 'NVIDIAA40'
                 # balance lambda
-                aug_lambda = 0.5 if loss_adjustment else 1.0
                 # plcrop is only necessary for Cityscapes as target domains
                 # ACDC and DarkZurich have no rectification artifacts.
-                plcrop = 'v2' if 'cityscapes' in target else False
-                plcrop = True
+                plcrop = True if 'cityscapes' in target else False
+                # plcrop = True
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     # -------------------------------------------------------------------------

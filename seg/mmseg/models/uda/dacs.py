@@ -487,11 +487,12 @@ class DACS(UDADecorator):
                                    target_img_metas, valid_pseudo_mask,
                                    pseudo_label, pseudo_weight)
             # Dynamic Loss Adjustment
-            # L_mask = alpha * L_mask
-            # alpha = 1 - (current_iter / total_iter)
+            # L_mask = weight * L_mask
+            # weight = (1 + cos(iter / total_iter) ** alpha * pi) / 2
             if self.loss_adjustment:
-                masked_loss['decode.loss_seg'] *= (
-                    1 - (self.local_iter / self.max_iters))
+                assert self.loss_adjustment >= 1
+                weight = (1 + np.cos((self.local_iter / self.max_iters) ** self.loss_adjustment * np.pi)) / 2
+                masked_loss['decode.loss_seg'] *= weight
 
             seg_debug.update(self.mic.debug_output)
             masked_loss = add_prefix(masked_loss, 'masked')
@@ -507,13 +508,6 @@ class DACS(UDADecorator):
                                    gt_semantic_seg, target_img,
                                    target_img_metas, valid_pseudo_mask,
                                    pseudo_label, pseudo_weight)
-            # Dynamic Loss Adjustment
-            # L_aug = L_aug + alpha * L_aug
-            # alpha = (current_iter / total_iter)
-            if self.loss_adjustment:
-                augmented_loss['decode.loss_seg'] += (
-                    augmented_loss['decode.loss_seg'] * 
-                        (self.local_iter / self.max_iters))
             
             seg_debug.update(self.aug_patch.debug_output)
             augmented_loss = add_prefix(augmented_loss, 'auged')
