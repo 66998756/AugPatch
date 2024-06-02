@@ -37,7 +37,8 @@ class AugPatchConsistencyModule(Module):
 
         self.geometric_perturb = cfg['geometric_perturb']
         if self.geometric_perturb:
-            self.perturb = GeometricPerturb(cfg['aug_generator']['aug_block_size'])
+            self.perturb = GeometricPerturb(
+                cfg['aug_generator']['aug_block_size'], self.geometric_perturb)
 
         # class masking config
         if cfg['cls_mask'] == 'Random':
@@ -176,7 +177,8 @@ class AugPatchConsistencyModule(Module):
             
         # Apply random patch geometric perturb
         if self.geometric_perturb:
-            auged_img = self.perturb.perturb_img(auged_img)
+            auged_img, auged_lbl = self.perturb.perturb_img_and_lbl(
+                auged_img, auged_lbl)
 
         # Train on masked images
         auged_loss = model.forward_train(
