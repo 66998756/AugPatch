@@ -292,6 +292,7 @@ def generate_experiment_cfgs(id):
                 aug_block_size=aug_block_size, 
                 _delete_=True)
             cfg['uda']['geometric_perturb'] = geometric_perturb
+            cfg['uda']['patch_mixing'] = patch_mixing
         if aug_mode is None:
             cfg['uda']['aug_mode'] = aug_mode
 
@@ -1100,9 +1101,10 @@ def generate_experiment_cfgs(id):
         inference = 'whole'
 
         # MIC setup
+        mask_mode = None
         mask_block_size, mask_ratio = 32, 0.7
         mask_lambda = 1.0
-        mask_mode = 'separate'
+        # mask_mode = 'separate'
 
         # AugPatch setup
         aug_mode = 'separateaug'
@@ -1130,7 +1132,7 @@ def generate_experiment_cfgs(id):
                     16,
                     32,
                     64,
-                    128
+                    # 128
                 ]:
                     gpu_model = 'NVIDIARTX2080Ti'
                     # balance lambda
@@ -1163,14 +1165,14 @@ def generate_experiment_cfgs(id):
         # MIC setup
         mask_block_size, mask_ratio = 32, 0.7
         mask_lambda = 1.0
-        mask_mode = 'separate'
+        mask_mode = None
 
         # AugPatch setup
         aug_mode = 'separateaug'
         aug_lambda = 1.0
         num_diff_aug = 8
         augment_setup = {'n': 8, 'm': 30}
-        aug_block_size = 32
+        aug_block_size = 16
         num_diff_aug = 8
         cls_mask = 'Random'
 
@@ -1191,7 +1193,7 @@ def generate_experiment_cfgs(id):
                     0.7,
                     0.9,
                 ]:
-                    gpu_model = 'NVIDIARTX2080Ti'
+                    # gpu_model = 'NVIDIARTX2080Ti'
                     # balance lambda
                     # plcrop is only necessary for Cityscapes as target domains
                     # ACDC and DarkZurich have no rectification artifacts.
@@ -1201,6 +1203,56 @@ def generate_experiment_cfgs(id):
                     }
                     cfg = config_from_vars()
                     cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # 碩論 with HRDA for Different UDA Benchmarks (Table 2)
+    # -------------------------------------------------------------------------
+    # yapf: disable
+    elif id == 96:
+        seeds = [0, 1, 2]
+        architecture, backbone = 'daformer_sepaspp', 'mitb5'
+        uda, rcs_T, plcrop = 'dacs_a999_fdthings', 0.01, False
+        rcs_min_crop = 0.5
+        gpu_model = 'NVIDIAGeForceRTX2080Ti'
+        inference = 'whole'
+
+        # MIC setup
+        mask_mode = None
+
+        # AugPatch setup
+        aug_mode = 'separatetrgaug'
+        aug_lambda = 1.0
+        aug_block_size = 16
+        num_diff_aug = 8
+        augment_setup = {'n': 4, 'm': 30}
+        cls_mask = 'Random'
+        geometric_perturb = {
+            'perturb_range': (30, 30, 30),
+            'perturb_prob': 0.5
+        }
+        patch_mixing = {
+            'mixing_ratio': 0.5,
+            'mode': 'same'
+        }
+
+        loss_adjustment = False
+
+        # Self-voting setup
+        enable_refine = False
+
+        for seed in seeds:
+            for source,          target in [
+                ('gta',        'cityscapes'),
+                ('cityscapes', 'acdc'),
+                # ('synthia',    'cityscapes'),
+                # ('cityscapes', 'darkzurich'),
+            ]:
+                gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = True if 'cityscapes' in target else False
+                # plcrop = 'v2'
+                cfg = config_from_vars()
+                cfgs.append(cfg)
     else:
         raise NotImplementedError('Unknown id {}'.format(id))
 

@@ -3,50 +3,6 @@ import torch.nn as nn
 import kornia.augmentation as K
 import kornia.geometry.transform as T
 
-# class RandomTransform:
-#     def __init__(self, perturb_range, perturb_prob):
-#         # Define the transformations: random rotate, translate, and shear
-#         self.transforms = torch.nn.Sequential(
-#             # K.RandomRotation(degrees=30),
-#             K.RandomAffine(degrees=(-15, 15), translate=(0.15, 0.15), shear=(-15, 15), p=0.3)
-#         )
-    
-#     def __call__(self, patches):
-#         # Apply transformations to the batch of patches
-#         # Expect patches of shape [B*N, C, aug_block_size, aug_block_size]
-#         # where B is batch size, N is number of patches per batch
-#         return self.transforms(patches)
-    
-
-# class GeometricPerturb:
-#     def __init__(self, block_size, cfg):
-#         self.aug_block_size = block_size
-#         self.perturb = RandomTransform(cfg['perturb_range'], cfg['perturb_prob'])
-    
-#     @torch.no_grad()
-#     def perturb_img_and_lbl(self, imgs):
-#         B, C, H, W = imgs.shape
-        
-#         # Unfold the image into patches
-#         patches = imgs.unfold(2, self.aug_block_size, self.aug_block_size).unfold(3, self.aug_block_size, self.aug_block_size)
-#         patches = patches.permute(0, 2, 3, 1, 4, 5).contiguous()  # Reshape to [B, nH, nW, C, H_patch, W_patch]
-#         patches = patches.view(-1, C, self.aug_block_size, self.aug_block_size)  # Flatten patches
-        
-#         # Apply random geometric perturbations
-#         perturbed_patches = self.perturb(patches)
-        
-#         # Fold the perturbed patches back into an image
-#         perturbed_patches = perturbed_patches.view(B, H // self.aug_block_size, W // self.aug_block_size, C, self.aug_block_size, self.aug_block_size)
-#         perturbed_patches = perturbed_patches.permute(0, 3, 1, 4, 2, 5).contiguous()
-#         perturbed_patches = perturbed_patches.view(B, C, H, W)
-
-#         # Mix two imgs
-#         mask = perturbed_patches == 0
-#         perturbed_patches[mask] = imgs[mask]
-        
-#         return perturbed_patches
-    
-
 
 class RandomTransform(nn.Module):
     def __init__(self, perturb_range, perturb_prob):

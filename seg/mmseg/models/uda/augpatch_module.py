@@ -15,6 +15,8 @@ from mmseg.models.utils.dacs_transforms import get_mean_std, strong_transform
 from mmseg.models.utils.augment_patch import Augmentations
 from mmseg.models.utils.class_masking import ClassMaskGenerator
 from mmseg.models.utils.geometric_perturb import GeometricPerturb
+from mmseg.models.utils.patch_mixing import PatchMixingGenerator
+
 
 
 class AugPatchConsistencyModule(Module):
@@ -39,6 +41,13 @@ class AugPatchConsistencyModule(Module):
         if self.geometric_perturb:
             self.perturb = GeometricPerturb(
                 cfg['aug_generator']['aug_block_size'], self.geometric_perturb)
+
+        self.patch_mixing = cfg['patch_mixing']
+        if self.patch_mixing:
+            self.patch_mixing.update(
+                {'aug_block_size': cfg['aug_generator']['aug_block_size']})
+            self.mixing = PatchMixingGenerator(self.patch_mixing)
+
 
         # class masking config
         if cfg['cls_mask'] == 'Random':
@@ -122,17 +131,33 @@ class AugPatchConsistencyModule(Module):
             gt_pixel_weight = torch.ones(auged_pweight[0].shape, device=dev)
             auged_seg_weight = torch.stack(
                 [gt_pixel_weight, auged_pweight[0]])
+            
+            # mix target
+            if self.patch_mixing['mode'] == 'same':     # same domain
+                mix_tgt = torch.stack([img[1], target_img[1]])
+                mix_lbl = torch.stack([gt_semantic_seg[1], auged_plabel[1]])
+            elif self.patch_mixing['mode'] == 'cross':  # cross domain
+                mix_tgt = torch.stack([target_img[1], img[1]])
+                mix_lbl = torch.stack([auged_plabel[1], gt_semantic_seg[1]])
         # Use only source images for MIC
         elif self.aug_mode in ['separatesrc', 'separatesrcaug']:
             auged_img = img
             auged_lbl = gt_semantic_seg
             auged_seg_weight = None
         # Use only target images for MIC
-        elif self.aug_mode in ['separatetrg', 'separatetrgaug', 'separatetrgaugAugPatch']:
+        elif self.aug_mode in ['separatetrg', 'separatetrgaug']:
             auged_img = target_img
             auged_lbl = auged_plabel.unsqueeze(1)
             # auged_lbl = auged_plabel
             auged_seg_weight = auged_pweight
+
+            # mix target
+            if self.patch_mixing['mode'] == 'same':     # same domain
+                mix_tgt = torch.stack([target_img[1], target_img[0]])
+                mix_lbl = torch.stack([auged_plabel[1], auged_plabel[0]])
+            elif self.patch_mixing['mode'] == 'cross':  # cross domain
+                mix_tgt = img
+                mix_lbl = gt_semantic_seg
         else:
             raise NotImplementedError(self.aug_mode)
 
@@ -175,6 +200,15 @@ class AugPatchConsistencyModule(Module):
             auged_img, mask_targets = self.cls_mask.mask_image(
                 auged_img, auged_lbl, valid_mask_region)
             
+        # Apply patch mixing
+        if self.patch_mixing:
+            # Apply at least one augmentation
+            mix_tgt = self.transforms.apply_transforms(
+                mix_tgt, means, stds, strong_parameters)
+            mix_tgt = torch.stack([mix_tgt[0][0], mix_tgt[0][1]])
+            auged_img, auged_lbl = self.mixing.mixing_img_and_lbl(
+                auged_img, mix_tgt, auged_lbl, mix_lbl)
+        
         # Apply random patch geometric perturb
         if self.geometric_perturb:
             auged_img, auged_lbl = self.perturb.perturb_img_and_lbl(
