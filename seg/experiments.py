@@ -281,26 +281,22 @@ def generate_experiment_cfgs(id):
                 _delete_=True)
         if aug_mode is not None:
             cfg.setdefault('uda', {})
-            cfg['uda']['aug_mode'] = aug_mode
-            cfg['uda']['aug_alpha'] = aug_alpha
-            cfg['uda']['aug_pseudo_threshold'] = aug_pseudo_threshold
-            cfg['uda']['aug_lambda'] = aug_lambda
-            cfg['uda']['aug_generator'] = dict(
-                type=aug_type,
-                augment_setup=augment_setup,
-                num_diff_aug=num_diff_aug, 
-                aug_block_size=aug_block_size, 
-                _delete_=True)
-            cfg['uda']['geometric_perturb'] = geometric_perturb
-            cfg['uda']['patch_mixing'] = patch_mixing
-        if aug_mode is None:
-            cfg['uda']['aug_mode'] = aug_mode
-
-        if cls_mask is not None:
-            cfg['uda']['cls_mask'] = cls_mask
-        else:
-            cfg['uda']['aug_mode'] = None
-
+            cfg['uda']['patch_augment'] = {
+                'aug_mode': aug_mode,
+                'aug_alpha': aug_alpha,
+                'aug_pseudo_threshold': aug_pseudo_threshold,
+                'aug_lambda': aug_lambda,
+                'aug_generator': dict(
+                    type=aug_type,
+                    augment_setup=augment_setup,
+                    num_diff_aug=num_diff_aug, 
+                    aug_block_size=aug_block_size, 
+                    aug_ratio=aug_ratio,
+                    _delete_=True),
+                'geometric_perturb': geometric_perturb,
+                'patch_mixing': patch_mixing,
+                'cls_mask': cls_mask,
+            }
         # Self-voting setup
         cfg['uda']['refine'] = None
         if enable_refine:
@@ -317,7 +313,6 @@ def generate_experiment_cfgs(id):
             cfg['uda']['refine'] = refine_cfg
         
         # 其他 Setup
-        cfg['uda']['cls_mask'] = cls_mask
         cfg['uda']['loss_adjustment'] = loss_adjustment
         cfg['uda']['debug_img_interval'] = iters // 40
 
@@ -1225,14 +1220,16 @@ def generate_experiment_cfgs(id):
         aug_mode = 'separatetrgaug'
         aug_lambda = 1.0
         aug_block_size = 16
+        aug_ratio = 0.5     # 多少比例的patch會採用rand augment
         num_diff_aug = 8
-        augment_setup = {'n': 4, 'm': 30}
+        augment_setup = {'n': 4, 'm': 10}
         cls_mask = 'Random'
+        # geometric_perturb = {
+        #     'perturb_range': (30, 30, 30),
+        #     'perturb_prob': 0.5
+        # }
         geometric_perturb = False
-        patch_mixing = {
-            'mixing_ratio': 0.5,
-            'mode': 'cross'
-        }
+        patch_mixing = False
 
         loss_adjustment = False
 
@@ -1240,18 +1237,25 @@ def generate_experiment_cfgs(id):
         enable_refine = False
 
         for seed in seeds:
-            for source,          target in [
-                ('gta',        'cityscapes'),
-                ('cityscapes', 'acdc'),
-                # ('synthia',    'cityscapes'),
-                # ('cityscapes', 'darkzurich'),
+            for ratio in [
+                0.5, 
+                0.7, 
+                0.3
             ]:
-                gpu_model = 'NVIDIATITANRTX'
-                # plcrop is only necessary for Cityscapes as target domains
-                # ACDC and DarkZurich have no rectification artifacts.
-                plcrop = True if 'cityscapes' in target else False
-                cfg = config_from_vars()
-                cfgs.append(cfg)
+                for source,        target in [
+                    ('gta',        'cityscapes'),
+                    ('cityscapes', 'acdc'),
+                    # ('synthia',    'cityscapes'),
+                    # ('cityscapes', 'darkzurich'),
+                ]:
+                    gpu_model = 'NVIDIATITANRTX'
+                    # plcrop is only necessary for Cityscapes as target domains
+                    # ACDC and DarkZurich have no rectification artifacts.
+                    plcrop = True if 'cityscapes' in target else False
+                    aug_mode = 'separatetrgaug' if 'cityscapes' in target else 'separateaug'
+                    aug_ratio = ratio
+                    cfg = config_from_vars()
+                    cfgs.append(cfg)
     else:
         raise NotImplementedError('Unknown id {}'.format(id))
 

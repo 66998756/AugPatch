@@ -98,8 +98,8 @@ class DACS(UDADecorator):
         self.mask_mode = cfg['mask_mode']
         self.enable_masking = self.mask_mode is not None
         # aug config
-        self.aug_mode = cfg['aug_mode']
-        self.enable_augment = self.aug_mode is not None
+        self.aug_cfg = cfg.pop('patch_augment')
+        self.enable_augment = self.aug_cfg is not None
         
         # refine config
         self.refine_cfg = cfg['refine']
@@ -127,8 +127,13 @@ class DACS(UDADecorator):
         if self.enable_masking:
             self.mic = MaskingConsistencyModule(require_teacher=False, cfg=cfg)
         if self.enable_augment:
+            self.aug_cfg.update({
+                'max_iters': cfg['max_iters'],
+                'color_jitter_strength': cfg['color_jitter_strength'],
+                'color_jitter_probability': cfg['color_jitter_probability']
+            })
             self.aug_patch = AugPatchConsistencyModule(
-                require_teacher=False, cfg=cfg)
+                require_teacher=False, cfg=self.aug_cfg)
         if self.enable_fdist:
             self.imnet_model = build_segmentor(deepcopy(cfg['model']))
         else:
@@ -502,7 +507,7 @@ class DACS(UDADecorator):
 
         # AugPatch Training
         mask_targets = None
-        if self.enable_augment and self.aug_mode.startswith('separate'):
+        if self.enable_augment and self.aug_cfg['aug_mode'].startswith('separate'):
             augmented_loss, mask_targets = self.aug_patch(
                                    self.get_model(), img, img_metas,
                                    gt_semantic_seg, target_img,

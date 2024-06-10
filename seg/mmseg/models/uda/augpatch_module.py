@@ -33,8 +33,9 @@ class AugPatchConsistencyModule(Module):
         self.aug_alpha = cfg['aug_alpha']
         self.aug_pseudo_threshold = cfg['aug_pseudo_threshold']
         self.aug_lambda = cfg['aug_lambda']
+        # self.aug_ratio = cfg['aug_ratio']
 
-        cfg['aug_generator'].update({'ignore_identity': None})
+        # cfg['aug_generator'].update({'aug_ratio': self.aug_ratio})
         self.transforms = Augmentations(cfg['aug_generator'])
 
         self.geometric_perturb = cfg['geometric_perturb']
@@ -47,7 +48,6 @@ class AugPatchConsistencyModule(Module):
             self.patch_mixing.update(
                 {'aug_block_size': cfg['aug_generator']['aug_block_size']})
             self.mixing = PatchMixingGenerator(self.patch_mixing)
-
 
         # class masking config
         if cfg['cls_mask'] == 'Random':

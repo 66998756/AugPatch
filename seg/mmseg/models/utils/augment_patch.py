@@ -1,3 +1,4 @@
+import random
 import torch
 
 from mmseg.ops import resize
@@ -11,10 +12,11 @@ class Augmentations:
         self.augment_setup = cfg['augment_setup']
         self.num_diff_aug = cfg['num_diff_aug']
         self.aug_block_size = cfg['aug_block_size']
+        self.aug_ratio = cfg['aug_ratio']
         
         self.ignore_identity = None
-        if cfg['ignore_identity']:
-            self.ignore_identity = cfg['ignore_identity']
+        # if cfg['ignore_identity']:
+        #     self.ignore_identity = cfg['ignore_identity']
         
         self.transforms = []
         for i in range(self.num_diff_aug):
@@ -34,7 +36,7 @@ class Augmentations:
         for batch_idx in range(imgs.shape[0]):
             # 由於 RandAug 是 PIL based 的所以只能迴圈處理
             batched_auged_img = []
-            for transform in self.transforms:    
+            for transform in self.transforms:
                 auged_img = transform(imgs[batch_idx], means, stds, basic_aug_param)
                 batched_auged_img.append(auged_img)
             auged_imgs.append(batched_auged_img)
@@ -42,6 +44,7 @@ class Augmentations:
     
     @torch.no_grad()
     def generate_augpatch(self, imgs, means, stds, basic_aug_param=None):
+        org_imgs = imgs.clone()
         auged_imgs = self.apply_transforms(imgs, means, stds, basic_aug_param)
 
         B, C, H, W = imgs.shape
@@ -58,5 +61,14 @@ class Augmentations:
                 auged_img = auged_img.squeeze()
                 imgs[batch][augment_indice == target] = \
                     auged_img[augment_indice == target]
+
+        # keep original img patch
+        mshape = B, 1, round(H / self.aug_block_size), round(
+            W / self.aug_block_size)
+        aug_mask = torch.rand(mshape, device=imgs.device)
+        aug_mask = (aug_mask > self.aug_ratio).float()
+        aug_mask = resize(aug_mask, size=(H, W)).expand(imgs.shape)
+
+        imgs[aug_mask.bool()] = org_imgs[aug_mask.bool()]
 
         return imgs
