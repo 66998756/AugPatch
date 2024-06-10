@@ -133,12 +133,13 @@ class AugPatchConsistencyModule(Module):
                 [gt_pixel_weight, auged_pweight[0]])
             
             # mix target
-            if self.patch_mixing['mode'] == 'same':     # same domain
-                mix_tgt = torch.stack([img[1], target_img[1]])
-                mix_lbl = torch.stack([gt_semantic_seg[1], auged_plabel[1]])
-            elif self.patch_mixing['mode'] == 'cross':  # cross domain
-                mix_tgt = torch.stack([target_img[1], img[1]])
-                mix_lbl = torch.stack([auged_plabel[1], gt_semantic_seg[1]])
+            if self.patch_mixing:
+                if self.patch_mixing['mode'] == 'same':     # same domain
+                    mix_tgt = torch.stack([img[1], target_img[1]])
+                    mix_lbl = torch.stack([gt_semantic_seg[1], auged_plabel[1]])
+                elif self.patch_mixing['mode'] == 'cross':  # cross domain
+                    mix_tgt = torch.stack([target_img[1], img[1]])
+                    mix_lbl = torch.stack([auged_plabel[1], gt_semantic_seg[1]])
         # Use only source images for MIC
         elif self.aug_mode in ['separatesrc', 'separatesrcaug']:
             auged_img = img
@@ -152,12 +153,13 @@ class AugPatchConsistencyModule(Module):
             auged_seg_weight = auged_pweight
 
             # mix target
-            if self.patch_mixing['mode'] == 'same':     # same domain
-                mix_tgt = torch.stack([target_img[1], target_img[0]])
-                mix_lbl = torch.stack([auged_plabel[1], auged_plabel[0]])
-            elif self.patch_mixing['mode'] == 'cross':  # cross domain
-                mix_tgt = img
-                mix_lbl = gt_semantic_seg
+            if self.patch_mixing:
+                if self.patch_mixing['mode'] == 'same':     # same domain
+                    mix_tgt = torch.stack([target_img[1], target_img[0]])
+                    mix_lbl = torch.stack([auged_plabel[1], auged_plabel[0]])
+                elif self.patch_mixing['mode'] == 'cross':  # cross domain
+                    mix_tgt = img
+                    mix_lbl = gt_semantic_seg
         else:
             raise NotImplementedError(self.aug_mode)
 

@@ -462,6 +462,9 @@ def generate_experiment_cfgs(id):
     # MIC like
     refine_conf = 0.968
 
+    # patch mixing
+    patch_mixing = False
+
     # -------------------------------------------------------------------------
     # MIC with HRDA for Different UDA Benchmarks (Table 2)
     # -------------------------------------------------------------------------
@@ -1121,7 +1124,7 @@ def generate_experiment_cfgs(id):
 
         for seed in seeds:
             for aug_times in [
-                2,
+                # 2,
                 4,
                 8,
                 16,
@@ -1225,13 +1228,10 @@ def generate_experiment_cfgs(id):
         num_diff_aug = 8
         augment_setup = {'n': 4, 'm': 30}
         cls_mask = 'Random'
-        geometric_perturb = {
-            'perturb_range': (30, 30, 30),
-            'perturb_prob': 0.5
-        }
+        geometric_perturb = False
         patch_mixing = {
             'mixing_ratio': 0.5,
-            'mode': 'same'
+            'mode': 'cross'
         }
 
         loss_adjustment = False
@@ -1250,7 +1250,6 @@ def generate_experiment_cfgs(id):
                 # plcrop is only necessary for Cityscapes as target domains
                 # ACDC and DarkZurich have no rectification artifacts.
                 plcrop = True if 'cityscapes' in target else False
-                # plcrop = 'v2'
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     else:

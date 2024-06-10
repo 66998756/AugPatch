@@ -30,9 +30,11 @@ class PatchMixingGenerator(nn.Module):
         # input_mask = input_mask * (1 - F.interpolate(zero_mask, size=(H, W), mode='nearest'))
 
         # 使用遮罩替换patch
-        # print(tgt_lbls.shape)
         src_imgs = src_imgs * ~(input_mask) + tgt_imgs.squeeze() * input_mask
-        src_lbls = src_lbls * ~(input_mask) + tgt_lbls.unsqueeze(1) * input_mask
+        if len(tgt_lbls.shape) != 4:
+            src_lbls = src_lbls * ~(input_mask) + tgt_lbls.unsqueeze(1) * input_mask
+        else:
+            src_lbls = src_lbls * ~(input_mask) + tgt_lbls * input_mask
         # src_imgs[~input_mask] = tgt_imgs[input_mask]
         # src_lbls[~input_mask] = tgt_lbls[input_mask]
         # print(src_imgs.shape)
