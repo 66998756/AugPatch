@@ -291,10 +291,9 @@ def generate_experiment_cfgs(id):
                     augment_setup=augment_setup,
                     num_diff_aug=num_diff_aug, 
                     aug_block_size=aug_block_size, 
-                    aug_ratio=aug_ratio,
                     _delete_=True),
                 'geometric_perturb': geometric_perturb,
-                'patch_mixing': patch_mixing,
+                'mixing_cfg': mixing_cfg,
                 'cls_mask': cls_mask,
             }
         # Self-voting setup
@@ -1206,56 +1205,109 @@ def generate_experiment_cfgs(id):
     # -------------------------------------------------------------------------
     # yapf: disable
     elif id == 96:
-        seeds = [0, 1, 2]
-        architecture, backbone = 'daformer_sepaspp', 'mitb5'
-        uda, rcs_T, plcrop = 'dacs_a999_fdthings', 0.01, False
-        rcs_min_crop = 0.5
-        gpu_model = 'NVIDIAGeForceRTX2080Ti'
-        inference = 'whole'
+        seeds = [2, 1, 0]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
 
         # MIC setup
-        mask_mode = None
+        mask_block_size, mask_ratio = 64, 0.7
+        mask_lambda = 1.0
+
+        # AugPatch setup
+        aug_lambda = 1.0
+        aug_block_size = 32
+        num_diff_aug = 8
+        augment_setup = {'n': 8, 'm': 30}
+        cls_mask = 'Random'
+        
+        mixing_cfg = False
+        # mixing_cfg = {
+        #     'mode': 'same',
+        #     'mixing_ratio': 0.5,
+        #     'mixing_type': 'cutmix'
+        # }
+
+        geometric_perturb = {
+            'perturb_range': (30, 30, 30),
+            'perturb_prob': 0.7
+        }
+        # geometric_perturb = False
+        loss_adjustment = 1.5
+
+        # Self-voting setup
+        enable_refine = False
+
+        for seed in seeds:
+            for source,             target,          mode in [
+                ('cityscapesHR',    'acdcHR',        'separateaug'),
+                # ('gtaHR',           'cityscapesHR',  'separatetrgaug'),
+                ('cityscapesHR',    'darkzurichHR',  'separateaug'),
+                # ('synthiaHR',       'cityscapesHR',  'separatetrgaug'),
+            ]:
+                gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                aug_mode = mode
+                mask_mode = mode if 'cityscapes' in target else mode[:-3]
+                cfg = config_from_vars()
+                cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # 碩論 with HRDA for Different UDA Benchmarks (Table 2)
+    # -------------------------------------------------------------------------
+    # yapf: disable
+    elif id == 97:
+        seeds = [0, 1, 2]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
+
+        # MIC setup
+        mask_block_size, mask_ratio = 64, 0.7
+        mask_lambda = 1.0
 
         # AugPatch setup
         aug_mode = 'separatetrgaug'
         aug_lambda = 1.0
-        aug_block_size = 16
-        aug_ratio = 0.5     # 多少比例的patch會採用rand augment
+        aug_block_size = 32
         num_diff_aug = 8
-        augment_setup = {'n': 4, 'm': 10}
+        augment_setup = {'n': 8, 'm': 30}
         cls_mask = 'Random'
+        
+        mixing_cfg = {
+            'mode': 'same',
+            'mixing_ratio': 0.5,
+            'mixing_type': 'cutmix'
+        }
+
         # geometric_perturb = {
         #     'perturb_range': (30, 30, 30),
         #     'perturb_prob': 0.5
         # }
         geometric_perturb = False
-        patch_mixing = False
-
         loss_adjustment = False
 
         # Self-voting setup
         enable_refine = False
 
         for seed in seeds:
-            for ratio in [
-                0.5, 
-                0.7, 
-                0.3
+            for source,             target,          mode in [
+                # ('gtaHR',           'cityscapesHR',  'separatetrgaug'),
+                ('cityscapesHR',    'acdcHR',        'separateaug'),
+                # ('synthia',    'cityscapes'),
+                # ('cityscapes', 'darkzurich'),
             ]:
-                for source,        target in [
-                    ('gta',        'cityscapes'),
-                    ('cityscapes', 'acdc'),
-                    # ('synthia',    'cityscapes'),
-                    # ('cityscapes', 'darkzurich'),
-                ]:
-                    gpu_model = 'NVIDIATITANRTX'
-                    # plcrop is only necessary for Cityscapes as target domains
-                    # ACDC and DarkZurich have no rectification artifacts.
-                    plcrop = True if 'cityscapes' in target else False
-                    aug_mode = 'separatetrgaug' if 'cityscapes' in target else 'separateaug'
-                    aug_ratio = ratio
-                    cfg = config_from_vars()
-                    cfgs.append(cfg)
+                gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                aug_mode = mode
+                mask_mode = mode if 'cityscapes' in target else mode[:-3]
+                cfg = config_from_vars()
+                cfgs.append(cfg)
     else:
         raise NotImplementedError('Unknown id {}'.format(id))
 

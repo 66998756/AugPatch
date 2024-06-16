@@ -12,7 +12,7 @@ class Augmentations:
         self.augment_setup = cfg['augment_setup']
         self.num_diff_aug = cfg['num_diff_aug']
         self.aug_block_size = cfg['aug_block_size']
-        self.aug_ratio = cfg['aug_ratio']
+        # self.aug_ratio = cfg['aug_ratio']
         
         self.ignore_identity = None
         # if cfg['ignore_identity']:
@@ -63,12 +63,12 @@ class Augmentations:
                     auged_img[augment_indice == target]
 
         # keep original img patch
-        mshape = B, 1, round(H / self.aug_block_size), round(
-            W / self.aug_block_size)
-        aug_mask = torch.rand(mshape, device=imgs.device)
-        aug_mask = (aug_mask > self.aug_ratio).float()
-        aug_mask = resize(aug_mask, size=(H, W)).expand(imgs.shape)
+        # mshape = B, 1, round(H / self.aug_block_size), round(
+        #     W / self.aug_block_size)
+        # aug_mask = torch.rand(mshape, device=imgs.device)
+        # aug_mask = (aug_mask > self.aug_ratio).float()
+        # aug_mask = resize(aug_mask, size=(H, W)).expand(imgs.shape)
 
-        imgs[aug_mask.bool()] = org_imgs[aug_mask.bool()]
+        # imgs[aug_mask.bool()] = org_imgs[aug_mask.bool()]
 
         return imgs
