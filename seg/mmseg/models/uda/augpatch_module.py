@@ -133,15 +133,16 @@ class AugPatchConsistencyModule(Module):
                 [gt_pixel_weight, auged_pweight[0]])
             
             # mix target
-            if self.mixing_cfg:
-                if self.mixing_cfg['mode'] == 'same':     # same domain
-                    mix_tgt = torch.stack([img[1], target_img[1]])
-                    mix_lbl = torch.stack(
-                        [gt_semantic_seg[1], auged_plabel[1].unsqueeze(0)])
-                elif self.mixing_cfg['mode'] == 'cross':  # cross domain
-                    mix_tgt = torch.stack([target_img[1], img[1]])
-                    mix_lbl = torch.stack(
-                        [auged_plabel[1].unsqueeze[0], gt_semantic_seg[1]])
+            # if self.mixing_cfg:
+
+            #     if self.mixing_cfg['mode'] == 'same':     # same domain
+            #         mix_tgt = torch.stack([img[1], target_img[1]])
+            #         mix_lbl = torch.stack(
+            #             [gt_semantic_seg[1], auged_plabel[1].unsqueeze(0)])
+            #     elif self.mixing_cfg['mode'] == 'cross':  # cross domain
+            #         mix_tgt = torch.stack([target_img[1], img[1]])
+            #         mix_lbl = torch.stack(
+            #             [auged_plabel[1].unsqueeze[0], gt_semantic_seg[1]])
         # Use only source images for MIC
         elif self.aug_mode in ['separatesrc', 'separatesrcaug']:
             auged_img = img
@@ -155,14 +156,14 @@ class AugPatchConsistencyModule(Module):
             auged_seg_weight = auged_pweight
 
             # mix target
-            if self.mixing_cfg:
-                if self.mixing_cfg['mode'] == 'same':     # same domain
-                    mix_tgt = torch.stack([target_img[1], target_img[0]])
-                    mix_lbl = torch.stack(
-                        [auged_plabel[1], auged_plabel[0]]).unsqueeze(1)
-                elif self.mixing_cfg['mode'] == 'cross':  # cross domain
-                    mix_tgt = img
-                    mix_lbl = gt_semantic_seg
+            # if self.mixing_cfg:
+            #     if self.mixing_cfg['mode'] == 'same':     # same domain
+            #         mix_tgt = torch.stack([target_img[1], target_img[0]])
+            #         mix_lbl = torch.stack(
+            #             [auged_plabel[1], auged_plabel[0]]).unsqueeze(1)
+            #     elif self.mixing_cfg['mode'] == 'cross':  # cross domain
+            #         mix_tgt = img
+            #         mix_lbl = gt_semantic_seg
         else:
             raise NotImplementedError(self.aug_mode)
 
@@ -187,9 +188,14 @@ class AugPatchConsistencyModule(Module):
 
         # Apply mixing
         if self.mixing_cfg:
-            # mix_tgt = torch.stack([mix_tgt[0][0], mix_tgt[0][1]])
-            auged_img, auged_lbl = self.mixing.mixing_img_and_lbl(
-                auged_img, mix_tgt, auged_lbl, mix_lbl)
+            mix_src = torch.stack((img[0], target_img[0]))
+            mix_tgt = target_img
+            mix_src_lbl = torch.stack(
+                (gt_semantic_seg[0], auged_plabel[0].unsqueeze(0)))
+            mix_tgt_lbl = auged_plabel
+
+            auged_img, auged_lbl, auged_seg_weight = self.mixing.mixing_img_and_lbl(
+                mix_src, mix_tgt, mix_src_lbl, mix_tgt_lbl, auged_pweight)
 
         # Apply AugPatch to image
         auged_img = self.transforms.generate_augpatch(
@@ -213,10 +219,16 @@ class AugPatchConsistencyModule(Module):
         
         # Apply random patch geometric perturb
         if self.geometric_perturb:
-            auged_img, auged_lbl = self.perturb.perturb_img_and_lbl(
-                auged_img, auged_lbl)
+            if self.mixing_cfg:
+                auged_img, auged_lbl, auged_seg_weight = self.perturb.perturb_img_and_lbl(
+                    auged_img, auged_lbl, auged_pweight.clone())
+            else:
+                auged_img, auged_lbl, _ = self.perturb.perturb_img_and_lbl(
+                    auged_img, auged_lbl, auged_pweight.clone())
 
         # Train on masked images
+        # print(torch.max(auged_seg_weight))
+        # print(torch.min(auged_seg_weight))
         auged_loss = model.forward_train(
             auged_img,
             img_metas,

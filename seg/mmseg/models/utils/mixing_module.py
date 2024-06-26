@@ -4,6 +4,9 @@ import torch.nn.functional as F
 
 import numpy as np
 
+from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
+                                                get_mean_std, strong_transform)
+
 
 class CutMix:
     def __init__(self, cut_rate=0.5):
@@ -43,7 +46,42 @@ class CutMix:
             lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (src_img.size()[-1] * src_img.size()[-2]))
 
         return mixed_src_img, mixed_src_lbls
+    
 
+class ClassMix:
+    def __init__(self, cut_rate=0.5):
+        self.cut_rate = cut_rate
+        self.strong_parameters = {
+            'mix': None,
+            'color_jitter': 0,
+            'color_jitter_s': 0,
+            'color_jitter_p': 1,
+            'blur': 0,
+            'mean': 0,
+            'std': 0
+        }
+
+
+    def __call__(self, 
+                 src_img, 
+                 tgt_img, 
+                 src_lbls, 
+                 tgt_lbls, 
+                 alpha=1.0):
+        mixed_img = src_img.clone()
+        mixed_lbls = src_lbls.clone()
+
+        mix_mask = get_class_masks(src_lbls)
+        for i in range(src_img.size(0)):
+            self.strong_parameters['mix'] = mix_mask[i]
+            mixed_img[i], mixed_lbls[i] = strong_transform(
+                self.strong_parameters,
+                data=torch.stack((src_img[i], tgt_img[i])),
+                target=torch.stack((src_lbls[i], tgt_lbls[i]))
+            )
+
+        return mixed_img, mixed_lbls
+    
 
 class MixingGenerator(nn.Module):
     def __init__(self, cfg):
@@ -52,29 +90,86 @@ class MixingGenerator(nn.Module):
         self.mixing_ratio = cfg['mixing_ratio']
         self.mixing_type = cfg['mixing_type']
 
+        self.strong_parameters = {
+            'mix': None,
+            'color_jitter': 0,
+            'color_jitter_s': 0,
+            'color_jitter_p': 1,
+            'blur': 0,
+            'mean': 0,
+            'std': 0
+        }
+
         if self.mixing_type == 'cutmix':
             self.mixing = CutMix(cut_rate=self.mixing_ratio)
+        elif self.mixing_type == 'classmix':
+            self.mixing = ClassMix(ignore_label=255)
         # elif self.mixing_type == 'cowmix':
         #     self.mixing = self.CowMix()
         # elif self.mixing_type == 'classmix':
         #     self.mixing = self.ClassMix()
 
     @torch.no_grad()
-    def mixing_img_and_lbl(self, src_imgs, tgt_imgs, src_lbls, tgt_lbls):
-        mixed_imgs, mixed_lbls = self.mixing(
-            src_imgs, tgt_imgs, src_lbls, tgt_lbls)
-        return mixed_imgs, mixed_lbls
-    
-    # @torch.no_grad()
-    # def CutMix(self, src_imgs, tgt_imgs, src_lbls, tgt_lbls):
-    #     pass
+    def mixing_img_and_lbl(self, 
+                           src_imgs, 
+                           tgt_imgs, 
+                           src_lbls, 
+                           tgt_lbls,
+                           pseudo_weight):
+        # mixed_imgs, mixed_lbls = self.mixing(
+        #     src_imgs, tgt_imgs, src_lbls, tgt_lbls)
+        # return mixed_imgs, mixed_lbls
+        # Apply mixing
+        
+        batch_size = src_imgs.shape[0]
+        mix_idx = torch.max(pseudo_weight[0]) > torch.max(pseudo_weight[1])
+        gt_pixel_weight = torch.ones((pseudo_weight.shape), 
+                                     device=src_imgs.device)
+        
+        # src_imgs: [CS[0], ACDC[0]]
+        # tgt_imgs: [ACDC[0], ACDC[1]]
+        # src_lbls: [CS[0], ACDC[0]]
+        # tgt_lbls: [ACDC[0], ACDC[1]]
+        # pseudo_weight: [gt_pixel_weight, auged_pweight[0]]
+        # gt_pixel_weight: [1, 1]
+        if mix_idx:
+            gt_pixel_weight[1] = pseudo_weight[0]
+        else:
+            # image 互換
+            src_imgs[1] = tgt_imgs[1]
+            tgt_imgs[1] = tgt_imgs[0]
+            tgt_imgs[0] = src_imgs[1]
 
-    # # TODO
-    # @torch.no_grad()
-    # def CowMix(self, src_imgs, tgt_imgs, src_lbls, tgt_lbls):
-    #     pass
+            # weight 互換
+            gt_pixel_weight[1] = pseudo_weight[1]
+            pseudo_weight[1] = pseudo_weight[0]
+            pseudo_weight[0] = gt_pixel_weight[1]
 
-    # # TODO
-    # @torch.no_grad()
-    # def ClassMix(self, src_imgs, tgt_imgs, src_lbls, tgt_lbls):
-    #     pass
+            # label 互換
+            src_lbls[1] = tgt_lbls[1]
+            tgt_lbls[1] = tgt_lbls[0]
+            tgt_lbls[0] = src_lbls[1]
+
+        mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
+        mixed_seg_weight = pseudo_weight.clone()
+        mix_masks = get_class_masks(src_lbls)
+
+        for i in range(batch_size):
+            self.strong_parameters['mix'] = mix_masks[i]
+            mixed_img[i], mixed_lbl[i] = strong_transform(
+                self.strong_parameters,
+                data=src_imgs if mix_idx else torch.stack((src_imgs[i], tgt_imgs[i])),
+                target=torch.stack(
+                    (src_lbls[i][0], tgt_lbls[i])))
+            _, mixed_seg_weight[i] = strong_transform(
+                self.strong_parameters,
+                target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])))
+        del gt_pixel_weight
+        mixed_img = torch.cat(mixed_img)
+        mixed_lbl = torch.cat(mixed_lbl)
+
+        # mix_tgt = torch.stack([mix_tgt[0][0], mix_tgt[0][1]])
+        # auged_img, auged_lbl = self.mixing.mixing_img_and_lbl(
+        #     auged_img, mix_tgt, auged_lbl, mix_lbl)
+
+        return mixed_img, mixed_lbl, mixed_seg_weight
