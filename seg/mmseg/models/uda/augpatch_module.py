@@ -195,7 +195,7 @@ class AugPatchConsistencyModule(Module):
             mix_tgt_lbl = auged_plabel
 
             auged_img, auged_lbl, auged_seg_weight = self.mixing.mixing_img_and_lbl(
-                mix_src, mix_tgt, mix_src_lbl, mix_tgt_lbl, auged_pweight)
+                mix_src, mix_tgt, mix_src_lbl, mix_tgt_lbl, auged_pweight.clone())
 
         # Apply AugPatch to image
         auged_img = self.transforms.generate_augpatch(
@@ -221,10 +221,10 @@ class AugPatchConsistencyModule(Module):
         if self.geometric_perturb:
             if self.mixing_cfg:
                 auged_img, auged_lbl, auged_seg_weight = self.perturb.perturb_img_and_lbl(
-                    auged_img, auged_lbl, auged_pweight.clone())
+                    auged_img, auged_lbl, auged_seg_weight.clone())
             else:
                 auged_img, auged_lbl, _ = self.perturb.perturb_img_and_lbl(
-                    auged_img, auged_lbl, auged_pweight.clone())
+                    auged_img, auged_lbl, auged_seg_weight.clone())
 
         # Train on masked images
         # print(torch.max(auged_seg_weight))

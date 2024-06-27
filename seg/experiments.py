@@ -1162,7 +1162,7 @@ def generate_experiment_cfgs(id):
         # MIC setup
         mask_block_size, mask_ratio = 32, 0.7
         mask_lambda = 1.0
-        mask_mode = None
+        mask_mode = 'separate'
 
         # AugPatch setup
         aug_mode = 'separateaug'
@@ -1173,33 +1173,30 @@ def generate_experiment_cfgs(id):
         num_diff_aug = 8
         cls_mask = 'Random'
 
+        mixing_cfg = {
+            'mode': 'same',
+            'mixing_ratio': 0.5,
+            'mixing_type': 'cutmix'
+        }
+
         # Self-voting setup
         enable_refine = False
 
         loss_adjustment = 1.5
+        geometric_perturb = {
+            'perturb_range': (15, 15, 15),
+            'perturb_prob': 0.7
+        }
+        geometric_perturb = False
 
         for seed in seeds:
-            for perturb_range in [
-                (15, 15, 15),
-                (30, 30, 30),
-                (45, 45, 45),
-            ]:
-                for perturb_prob in [
-                    0.3,
-                    0.5,
-                    0.7,
-                    0.9,
-                ]:
-                    # gpu_model = 'NVIDIARTX2080Ti'
-                    # balance lambda
-                    # plcrop is only necessary for Cityscapes as target domains
-                    # ACDC and DarkZurich have no rectification artifacts.
-                    geometric_perturb = {
-                        'perturb_range': perturb_range,
-                        'perturb_prob': perturb_prob
-                    }
-                    cfg = config_from_vars()
-                    cfgs.append(cfg)
+            # gpu_model = 'NVIDIARTX2080Ti'
+            # balance lambda
+            # plcrop is only necessary for Cityscapes as target domains
+            # ACDC and DarkZurich have no rectification artifacts.
+
+            cfg = config_from_vars()
+            cfgs.append(cfg)
     # -------------------------------------------------------------------------
     # 碩論 with HRDA for Different UDA Benchmarks (Table 2)
     # -------------------------------------------------------------------------

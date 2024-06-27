@@ -60,7 +60,7 @@ class GeometricPerturb(nn.Module):
         # Apply random geometric perturbations to both image and label patches
         perturbed_img_patches, transform_matrices = self.perturb(img_patches)
         perturbed_lbl_patches = T.warp_affine(lbl_patches.float(), transform_matrices, dsize=(self.aug_block_size, self.aug_block_size), mode='nearest', padding_mode='zeros').long()
-        perturbed_pweight_patches = T.warp_affine(pweight_patches.float(), transform_matrices, dsize=(self.aug_block_size, self.aug_block_size), mode='nearest', padding_mode='zeros').long()
+        perturbed_pweight_patches = T.warp_affine(pweight_patches.float(), transform_matrices, dsize=(self.aug_block_size, self.aug_block_size), mode='nearest', padding_mode='zeros').float()
 
         # Reshape back to original shape for combining
         perturbed_img_patches = perturbed_img_patches.view(B, H // self.aug_block_size, W // self.aug_block_size, C, self.aug_block_size, self.aug_block_size)
@@ -78,10 +78,10 @@ class GeometricPerturb(nn.Module):
         # Replace padding values with original image and label values
         perturbed_img[perturbed_img == 0] = imgs[perturbed_img == 0]
         perturbed_lbl[perturbed_lbl == 0] = lbls[perturbed_lbl == 0]
-        perturbed_pweight[perturbed_lbl == 0] = perturbed_pweight[perturbed_lbl == 0]
+        perturbed_pweight[perturbed_pweight == 0] = pweight[perturbed_pweight == 0]
 
         # Postprocess labels: change -1 back to 0
         perturbed_lbl[perturbed_lbl == -1] = 0
         perturbed_pweight[perturbed_pweight == -1] = 0
 
-        return perturbed_img, perturbed_lbl, perturbed_pweight
+        return perturbed_img, perturbed_lbl, perturbed_pweight.squeeze()

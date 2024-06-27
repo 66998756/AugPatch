@@ -130,30 +130,30 @@ class MixingGenerator(nn.Module):
         # tgt_imgs: [ACDC[0], ACDC[1]]
         # src_lbls: [CS[0], ACDC[0]]
         # tgt_lbls: [ACDC[0], ACDC[1]]
-        # pseudo_weight: [gt_pixel_weight, auged_pweight[0]]
+        # pseudo_weight: [auged_pweight[0], auged_pweight[1]]
         # gt_pixel_weight: [1, 1]
         if mix_idx:
-            gt_pixel_weight[1] = pseudo_weight[0]
+            gt_pixel_weight[1] = pseudo_weight[0].clone()
         else:
             # image 互換
-            src_imgs[1] = tgt_imgs[1]
-            tgt_imgs[1] = tgt_imgs[0]
-            tgt_imgs[0] = src_imgs[1]
-
-            # weight 互換
-            gt_pixel_weight[1] = pseudo_weight[1]
-            pseudo_weight[1] = pseudo_weight[0]
-            pseudo_weight[0] = gt_pixel_weight[1]
+            src_imgs[1] = tgt_imgs[1].clone()
+            tgt_imgs[1] = tgt_imgs[0].clone()
+            tgt_imgs[0] = src_imgs[1].clone()
 
             # label 互換
-            src_lbls[1] = tgt_lbls[1]
-            tgt_lbls[1] = tgt_lbls[0]
-            tgt_lbls[0] = src_lbls[1]
+            src_lbls[1] = tgt_lbls[1].clone()
+            tgt_lbls[1] = tgt_lbls[0].clone()
+            tgt_lbls[0] = src_lbls[1].clone()
 
+            # weight 互換
+            gt_pixel_weight[1] = pseudo_weight[1].clone()
+            tmp = pseudo_weight[0].clone()
+            pseudo_weight[0] = pseudo_weight[1].clone()
+            pseudo_weight[1] = tmp
+            
         mixed_img, mixed_lbl = [None] * batch_size, [None] * batch_size
         mixed_seg_weight = pseudo_weight.clone()
         mix_masks = get_class_masks(src_lbls)
-
         for i in range(batch_size):
             self.strong_parameters['mix'] = mix_masks[i]
             mixed_img[i], mixed_lbl[i] = strong_transform(
