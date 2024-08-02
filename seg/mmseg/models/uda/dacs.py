@@ -123,9 +123,10 @@ class DACS(UDADecorator):
         if not self.source_only:
             self.ema_model = build_segmentor(ema_cfg)
         self.mic = None
-        self.aug_patch = None
         if self.enable_masking:
             self.mic = MaskingConsistencyModule(require_teacher=False, cfg=cfg)
+
+        self.aug_patch, self.aug_patch_mask, self.aug_patch_mix = None, None, None
         if self.enable_augment:
             self.aug_cfg.update({
                 'max_iters': cfg['max_iters'],
@@ -134,6 +135,26 @@ class DACS(UDADecorator):
             })
             self.aug_patch = AugPatchConsistencyModule(
                 require_teacher=False, cfg=self.aug_cfg)
+            # unify consis
+            if self.aug_cfg['consis_mode'] == 'unify':
+                self.aug_cfg.update({
+                    'mixing_cfg': False,
+                    'cls_mask': 'Random'
+                })
+                self.aug_patch_mask = AugPatchConsistencyModule(
+                    require_teacher=False, cfg=self.aug_cfg)
+                
+                self.aug_cfg.update({
+                    'mixing_cfg': {
+                        'mode': 'same',
+                        'mixing_ratio': 0.5,
+                        'mixing_type': 'cutmix'
+                    },
+                    'cls_mask': False
+                })
+                self.aug_patch_mix = AugPatchConsistencyModule(
+                    require_teacher=False, cfg=self.aug_cfg)
+                
         if self.enable_fdist:
             self.imnet_model = build_segmentor(deepcopy(cfg['model']))
         else:
@@ -301,6 +322,9 @@ class DACS(UDADecorator):
             self.mic.debug = debug
         if self.aug_patch is not None:
             self.aug_patch.debug = debug
+        if self.aug_cfg['consis_mode'] == 'unify':
+            self.aug_patch_mask.debug = debug
+            self.aug_patch_mix.debug = debug
 
     def get_pseudo_label_and_weight(self, logits):
         ema_softmax = torch.softmax(logits.detach(), dim=1)
@@ -364,8 +388,11 @@ class DACS(UDADecorator):
             # assert self.get_ema_model().training
         if self.mic is not None:
             self.mic.update_weights(self.get_model(), self.local_iter)
-        if self.aug_patch is not None:
+        if self.aug_patch and self.aug_cfg['consis_mode'] != 'unify':
             self.aug_patch.update_weights(self.get_model(), self.local_iter)
+        if self.aug_cfg['consis_mode'] == 'unify':
+            self.aug_patch_mask.update_weights(self.get_model(), self.local_iter)
+            self.aug_patch_mix.update_weights(self.get_model(), self.local_iter)
 
         self.update_debug_state()
         seg_debug = {}
@@ -507,18 +534,46 @@ class DACS(UDADecorator):
 
         # AugPatch Training
         mask_targets = None
-        if self.enable_augment and self.aug_cfg['aug_mode'].startswith('separate'):
+        # if self.enable_augment and self.aug_cfg['aug_mode'].startswith('separate'):
+        if self.aug_patch and self.aug_cfg['consis_mode'] != 'unify':
             augmented_loss, mask_targets = self.aug_patch(
-                                   self.get_model(), img, img_metas,
-                                   gt_semantic_seg, target_img,
-                                   target_img_metas, valid_pseudo_mask,
-                                   pseudo_label, pseudo_weight)
+                                self.get_model(), img, img_metas,
+                                gt_semantic_seg, target_img,
+                                target_img_metas, valid_pseudo_mask,
+                                pseudo_label, pseudo_weight)
             
             seg_debug.update(self.aug_patch.debug_output)
             augmented_loss = add_prefix(augmented_loss, 'auged')
             augmented_loss, augmented_log_vars = self._parse_losses(augmented_loss)
             log_vars.update(augmented_log_vars)
             augmented_loss.backward()
+        
+        if self.aug_cfg['consis_mode'] == 'unify':
+            # mixing img consis
+            augmented_mix_loss, _ = self.aug_patch_mix(
+                                self.get_model(), img, img_metas,
+                                gt_semantic_seg, target_img,
+                                target_img_metas, valid_pseudo_mask,
+                                pseudo_label, pseudo_weight)
+            
+            seg_debug.update(self.aug_patch_mix.debug_output)
+            augmented_mix_loss = add_prefix(augmented_mix_loss, 'auged_mix')
+            augmented_mix_loss, augmented_mix_log_vars = self._parse_losses(augmented_mix_loss)
+            log_vars.update(augmented_mix_log_vars)
+            augmented_mix_loss.backward()
+
+            # mask img consis
+            augmented_mask_loss, mask_targets = self.aug_patch_mask(
+                                self.get_model(), img, img_metas,
+                                gt_semantic_seg, target_img,
+                                target_img_metas, valid_pseudo_mask,
+                                pseudo_label, pseudo_weight)
+            
+            seg_debug.update(self.aug_patch_mask.debug_output)
+            augmented_mask_loss = add_prefix(augmented_mask_loss, 'auged_mask')
+            augmented_mask_loss, augmented_mask_log_vars = self._parse_losses(augmented_mask_loss)
+            log_vars.update(augmented_mask_log_vars)
+            augmented_mask_loss.backward()
 
         if self.local_iter % self.debug_img_interval == 0 and \
                 not self.source_only:

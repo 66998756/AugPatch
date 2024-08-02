@@ -84,4 +84,4 @@ class GeometricPerturb(nn.Module):
         perturbed_lbl[perturbed_lbl == -1] = 0
         perturbed_pweight[perturbed_pweight == -1] = 0
 
-        return perturbed_img, perturbed_lbl, perturbed_pweight.squeeze()
+        return perturbed_img, lbls, pweight.squeeze()

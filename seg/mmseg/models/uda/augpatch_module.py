@@ -33,7 +33,8 @@ class AugPatchConsistencyModule(Module):
         self.aug_alpha = cfg['aug_alpha']
         self.aug_pseudo_threshold = cfg['aug_pseudo_threshold']
         self.aug_lambda = cfg['aug_lambda']
-        # self.aug_ratio = cfg['aug_ratio']
+
+        self.consis_mode = cfg['consis_mode']
 
         # cfg['aug_generator'].update({'aug_ratio': self.aug_ratio})
         self.transforms = Augmentations(cfg['aug_generator'])
@@ -239,9 +240,12 @@ class AugPatchConsistencyModule(Module):
             auged_loss['decode.loss_seg'] *= self.aug_lambda
 
         if self.debug:
-            self.debug_output['Auged'] = model.debug_output
+            title = 'Auged'
+            if self.consis_mode == 'unify':
+                title = 'Auged_mask' if self.cls_mask else 'Auged_mix'
+            self.debug_output[title] = model.debug_output
             if auged_seg_weight is not None:
-                self.debug_output['Auged']['PL Weight'] = \
+                self.debug_output[title]['PL Weight'] = \
                     auged_seg_weight.cpu().numpy()
 
         return auged_loss, mask_targets
