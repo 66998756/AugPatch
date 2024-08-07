@@ -1511,9 +1511,10 @@ def generate_experiment_cfgs(id):
         #     'mixing_type': 'cutmix'
         # }
 
-        geometric_perturb = {
+        gp = {
             'perturb_range': (30, 30, 30),
-            'perturb_prob': 0.7
+            'patch_p': 0.7,
+            'image_p': 0.5
         }
         # geometric_perturb = False
         loss_adjustment = 5
@@ -1568,7 +1569,7 @@ def generate_experiment_cfgs(id):
         aug_mode = 'separateaug'
         aug_lambda = 0.25
         num_diff_aug = 8
-        augment_setup = {'n': 6, 'm': 30}
+        augment_setup = {'n': 8, 'm': 30}
         aug_block_size = 16
 
         mixing_cfg = {
@@ -1577,7 +1578,11 @@ def generate_experiment_cfgs(id):
             'mixing_type': 'cutmix'
         }
         cls_mask = 'Random'
-        geometric_perturb = False
+        geometric_perturb = {
+            'perturb_range': (30, 30, 30),
+            'patch_p': 0.7,
+            'image_p': 0.5
+        }
 
         loss_adjustment = 5
 
@@ -1594,6 +1599,59 @@ def generate_experiment_cfgs(id):
     # AugPatch ablation for geometric perturb
     # -------------------------------------------------------------------------
     # yapf: disable
+    # -------------------------------------------------------------------------
+    # 碩論 with HRDA for Different UDA Benchmarks (Table 2)
+    # -------------------------------------------------------------------------
+    # yapf: disable
+    elif id == 103:
+        seeds = [2, 1, 0]
+        architecture, backbone = 'hrda1-512-0.1_daformer_sepaspp', 'mitb5'
+        uda, rcs_T = 'dacs_a999_fdthings', 0.01
+        crop, rcs_min_crop = '1024x1024', 0.5 * (2 ** 2)
+        inference = 'slide'
+
+        # MIC setup
+        mask_block_size, mask_ratio = 64, 0.7
+        mask_lambda = 1.0
+
+        # AugPatch setup
+        aug_lambda = 0.5
+        aug_block_size = 16
+        num_diff_aug = 8
+        augment_setup = {'n': 8, 'm': 30}
+        cls_mask = 'Random'
+        
+        # mixing_cfg = False
+        mixing_cfg = {
+            'mode': 'same',
+            'mixing_ratio': 0.5,
+            'mixing_type': 'cutmix'
+        }
+
+        geometric_perturb = {
+            'perturb_range': (30, 30, 30),
+            'patch_p': 0.5,
+            'image_p': 0.5
+        }
+
+        consis_mode = 'unify'
+        loss_adjustment = 5.0
+
+        for seed in seeds:
+            for source,             target,          mode in [
+                # ('cityscapesHR',    'acdcHR',        'separateaug'),
+                ('cityscapesHR',    'darkzurichHR',  'separateaug'),
+                # ('synthiaHR',       'cityscapesHR',  'separatetrgaug'),
+            ]:
+                gpu_model = 'NVIDIATITANRTX'
+                # plcrop is only necessary for Cityscapes as target domains
+                # ACDC and DarkZurich have no rectification artifacts.
+                plcrop = 'v2' if 'cityscapes' in target else False
+                aug_mode = mode
+                mask_mode = mode if 'cityscapes' in target else mode[:-3]
+
+                cfg = config_from_vars()
+                cfgs.append(cfg)
     elif id == 0:
         seeds = [2]
         source, target = 'cityscapes', 'acdc'
@@ -1641,7 +1699,8 @@ def generate_experiment_cfgs(id):
         }
         gp = {
             'perturb_range': (30, 30, 30),
-            'perturb_prob': 0.7
+            'patch_p': 0.7,
+            'image_p': 0.5
         }
         consis_mode = False
         
