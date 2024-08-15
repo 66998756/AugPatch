@@ -138,18 +138,14 @@ class DACS(UDADecorator):
             # unify consis
             if self.aug_cfg['consis_mode'] == 'unify':
                 self.aug_cfg.update({
-                    'mixing_cfg': False,
+                    'semantic_mixing': False,
                     'cls_mask': 'Random'
                 })
                 self.aug_patch_mask = AugPatchConsistencyModule(
                     require_teacher=False, cfg=self.aug_cfg)
                 
                 self.aug_cfg.update({
-                    'mixing_cfg': {
-                        'mode': 'same',
-                        'mixing_ratio': 0.5,
-                        'mixing_type': 'cutmix'
-                    },
+                    'semantic_mixing': cfg['semantic_mixing'],
                     'cls_mask': False
                 })
                 self.aug_patch_mix = AugPatchConsistencyModule(

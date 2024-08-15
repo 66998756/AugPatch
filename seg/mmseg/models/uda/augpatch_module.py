@@ -44,11 +44,9 @@ class AugPatchConsistencyModule(Module):
             self.perturb = GeometricPerturb(
                 cfg['aug_generator']['aug_block_size'], self.geometric_perturb)
 
-        self.mixing_cfg = cfg['mixing_cfg']
-        if self.mixing_cfg:
-            self.mixing_cfg.update(
-                {'aug_block_size': cfg['aug_generator']['aug_block_size']})
-            self.mixing = MixingGenerator(self.mixing_cfg)
+        self.semantic_mixing = cfg['semantic_mixing']
+        if self.semantic_mixing:
+            self.mixing = MixingGenerator(self.semantic_mixing)
 
         # class masking config
         if cfg['cls_mask'] == 'Random':

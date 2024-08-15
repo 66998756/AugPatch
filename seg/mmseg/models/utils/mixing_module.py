@@ -86,8 +86,6 @@ class ClassMix:
 class MixingGenerator(nn.Module):
     def __init__(self, cfg):
         super(MixingGenerator, self).__init__()
-        self.aug_block_size = cfg['aug_block_size']
-        self.mixing_ratio = cfg['mixing_ratio']
         self.mixing_type = cfg['mixing_type']
 
         self.strong_parameters = {
@@ -101,13 +99,11 @@ class MixingGenerator(nn.Module):
         }
 
         if self.mixing_type == 'cutmix':
-            self.mixing = CutMix(cut_rate=self.mixing_ratio)
+            self.mixing = CutMix(cut_rate=0.5)
         elif self.mixing_type == 'classmix':
             self.mixing = ClassMix(ignore_label=255)
         # elif self.mixing_type == 'cowmix':
         #     self.mixing = self.CowMix()
-        # elif self.mixing_type == 'classmix':
-        #     self.mixing = self.ClassMix()
 
     @torch.no_grad()
     def mixing_img_and_lbl(self, 
